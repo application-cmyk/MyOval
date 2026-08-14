@@ -289,6 +289,7 @@
                         <!-- C. Card Riepilogo (Sempre visibile) -->
                         <div class="main-card mb-3 shadow-sm border-0 position-relative">
 
+                            <!-- Area Codici Tesseramento (In alto a destra, posizionamento assoluto) -->
                             <div id="ui-codici-list"
                                 class="position-absolute top-0 end-0 p-3 d-flex flex-column align-items-end gap-1">
                             </div>
@@ -296,20 +297,32 @@
                             <!-- Nome Atleta -->
                             <div class="atleta-nome mb-2" id="ui-nome-completo">--- ---</div>
 
-                            <!-- Riga Tecnica: Badge Stato + Pillole (Stagione, Categoria, Tipo) -->
-                            <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
-                                <div id="ui-badge-stato" class="badge-stato m-0 d-none"></div>
-                                <div class="tech-pill"><span class="label-xxs">STAGIONE</span> <span
-                                        id="ui-stagione">-</span></div>
-                                <div class="tech-pill"><span class="label-xxs">CATEGORIA</span> <span
-                                        id="ui-categoria">-</span></div>
-                                <div class="tech-pill"><span class="label-xxs">TIPO</span> <span id="ui-tipo">-</span>
+                            <!-- RIGA TECNICA: Badge Stato + Pillole (Stagione, Categoria, Tipo) -->
+                            <!-- Tutto questo blocco viene controllato tramite l'ID ui-tech-header -->
+                            <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="ui-tech-header">
+
+                                <!-- BOX STATO (Giallo/Verde) - Recuperato! -->
+                                <div id="ui-badge-stato" class="badge-stato m-0 d-none">---</div>
+
+                                <div class="tech-pill">
+                                    <span class="label-xxs">STAGIONE</span>
+                                    <span id="ui-stagione" class="val-tech">-</span>
+                                </div>
+
+                                <div class="tech-pill">
+                                    <span class="label-xxs">CATEGORIA</span>
+                                    <span id="ui-categoria" class="val-tech">-</span>
+                                </div>
+
+                                <div class="tech-pill">
+                                    <span class="label-xxs">TIPO</span>
+                                    <span id="ui-tipo" class="val-tech">-</span>
                                 </div>
                             </div>
 
                             <hr class="opacity-10 my-3">
 
-                            <!-- Riga Anagrafica Base: Ruolo (Largo) e Nascita (Stretto) -->
+                            <!-- Riga Anagrafica Base -->
                             <div class="row g-3">
                                 <div class="col-12 col-md-8">
                                     <div class="label-xs">Ruolo</div>

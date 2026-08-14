@@ -384,3 +384,36 @@ body {
     justify-content: center;
   }
 }
+
+.tech-pill {
+  background-color: #f1f3f5;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 5px 12px;
+  min-width: 90px;
+  display: flex;
+  flex-direction: column;
+}
+
+.label-xxs {
+  font-size: 0.55rem;
+  font-weight: 800;
+  color: #888;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.val-tech {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #333;
+}
+
+.badge-stato {
+  height: 38px;
+  /* Allineato all'altezza delle tech-pill */
+  display: flex;
+  align-items: center;
+  border-radius: 12px;
+  padding: 0 15px;
+}

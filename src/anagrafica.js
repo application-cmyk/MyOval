@@ -93,90 +93,109 @@ export function validateAllMembers() {
  * 4. GESTISCE IL CLICK SULLA BOLLA
  */
 export async function selectMember(index) {
+    console.group("🔍 DIAGNOSI SELEZIONE MEMBRO");
+
     if (!window.globalData || !window.globalData.famiglia || !window.globalData.famiglia.data[index]) {
-        console.error("❌ Dati non pronti per l'indice:", index);
+        console.error("❌ Dati globali non pronti per l'indice:", index);
+        console.groupEnd();
         return;
     }
 
-    const memberBase = window.globalData.famiglia.data[index];
-    const idC = (memberBase.IDContatto || "").toString().toLowerCase().trim();
-
-    // --- LOGICA DI RICONOSCIMENTO GUIDATA DAL RUOLO ---
-    // Leggiamo il ruolo e verifichiamo se contiene la parola "atleta"
-    const ruoloStr = (getValue(memberBase, "Ruolo") || "").toLowerCase();
-    const isAtleta = ruoloStr.includes("atleta");
-
-    // Scelta del profilo di configurazione
-    const profileTarget = isAtleta ? "ATLETA" : "ASSOCIATO";
-
-    console.log(`%c 🎯 SELEZIONE: ${memberBase.Nome} `, "background: #1a2b3c; color: #fff; font-weight: bold;");
-    console.log(`👤 Ruolo trovato: "${ruoloStr}"`);
-    console.log(`✨ IsAtleta: ${isAtleta} | Profilo applicato: ${profileTarget}`);
-
+    const m = window.globalData.famiglia.data[index];
+    // Pulizia ID: fondamentale per il match con la mappa atleti
+    const idC = (m.IDContatto || "").toString().toLowerCase().trim();
     window.currentMemberIndex = index;
-    window.currentProfileInUso = profileTarget;
 
-    // --- MERGE DEI DATI ---
-    // Recuperiamo i dati tecnici, kit e privacy per popolare i campi (se esistono)
+    console.log("👤 Membro selezionato:", m.Nome, m.Cognome, "(ID:", idC, ")");
+
+    // 1. DETERMINAZIONE RUOLO
+    const ruoloStr = (getValue(m, "Ruolo") || "").toLowerCase();
+    const isAtleta = ruoloStr.includes("atleta");
+    console.log("🏃 IsAtleta (da ruolo):", isAtleta);
+
+    // 2. RECUPERO DATI TECNICI (Il punto critico)
+    // Vediamo cosa c'è in tutta la mappa degli atleti
+    console.log("📋 Mappa Atleti globale:", window.globalData.atleti);
+
     const tech = window.globalData.atleti[idC] || {};
+    console.log("📊 Dati tecnici trovati per questo ID:", tech);
+
     const kit = window.globalData.taglieKit[idC] || {};
     const priv = window.globalData.privacyData[idC] || {};
-    const fullData = { ...memberBase, ...tech, ...kit, ...priv };
+    const fullData = { ...m, ...tech, ...kit, ...priv };
 
-    // 1. Gestione visuale delle bolle
+    // 3. UI: Gestione Bolle
     document.querySelectorAll('.family-item').forEach(el => el.classList.remove('active'));
     const bubble = document.getElementById(`f-${index}`);
     if (bubble) bubble.classList.add('active');
 
-    // 2. Aggiornamento Dashboard Superiore (Sommario)
-    const fullNome = `${memberBase.Cognome || ''} ${memberBase.Nome || ''}`.toUpperCase();
-    safeSet('ui-nome-completo', fullNome);
-    safeSet('ui-ruolo', memberBase.Ruolo || "Socio");
-    safeSet('ui-nascita', formattaDataRugby(memberBase.Data_Nascita));
-    safeSet('ui-anagrafica-title', `ANAGRAFICA ${fullNome}`);
+    // 4. AGGIORNAMENTO TESTI BASE
+    safeSet('ui-nome-completo', `${getValue(m, "Cognome")} ${getValue(m, "Nome")}`.toUpperCase());
+    safeSet('ui-ruolo', getValue(m, "Ruolo") || "Socio");
+    safeSet('ui-nascita', formattaDataRugby(getValue(m, "Data_Nascita")));
+    safeSet('ui-anagrafica-title', `ANAGRAFICA ${getValue(m, "Nome")}`.toUpperCase());
 
-    // Gestione Pillole Tecniche (Stagione, Categoria, Tipo)
+    // 5. AGGIORNAMENTO BOX GRIGI (STAGIONE, CATEGORIA, TIPO)
     const techHeader = document.getElementById('ui-tech-header');
     if (techHeader) {
         if (isAtleta) {
+            console.log("✨ Riempimento box tecnici...");
             techHeader.classList.remove('d-none');
-            safeSet('ui-stagione', tech.Stagione || "-");
-            safeSet('ui-categoria', tech.Categoria_Fed || tech.Categoria || "-");
-            safeSet('ui-tipo', tech.Tipo || "-");
+
+            const stag = getValue(tech, "Stagione");
+            const cat = getValue(tech, "Categoria_Fed") || getValue(tech, "Categoria");
+            const tipo = getValue(tech, "Tipo");
+
+            console.log(`📝 Valori estratti -> Stag: ${stag}, Cat: ${cat}, Tipo: ${tipo}`);
+
+            safeSet('ui-stagione', stag || "-");
+            safeSet('ui-categoria', cat || "-");
+            safeSet('ui-tipo', tipo || "-");
         } else {
-            // Se non è atleta, nascondiamo l'intera riga tecnica
+            console.log("🚫 Membro non atleta: nascondo box tecnici.");
             techHeader.classList.add('d-none');
         }
+    } else {
+        console.error("❌ Elemento 'ui-tech-header' non trovato nell'HTML!");
     }
 
-    // 3. Gestione Badge Stato (Box Giallo/Verde)
+    // 6. BADGE STATO (IL BOX GIALLO/VERDE)
     const badge = document.getElementById('ui-badge-stato');
     if (badge) {
-        if (isAtleta && tech.Stato_Tesseramento) {
-            const st = tech.Stato_Tesseramento.toUpperCase();
-            badge.innerText = st;
-            badge.className = "badge-stato " + (st.includes("TESSERATO") ? "bg-success text-white" : "bg-warning text-dark");
+        const statoVal = getValue(tech, "Stato_Tesseramento");
+        console.log("🏷️ Stato Tesseramento rilevato:", statoVal);
+
+        if (isAtleta && statoVal && statoVal !== "") {
+            badge.innerText = statoVal.toUpperCase();
+            // Verde se tesserato, Giallo altrimenti
+            if (statoVal.toUpperCase().includes("TESSERATO")) {
+                badge.className = "badge-stato bg-success text-white";
+            } else {
+                badge.className = "badge-stato bg-warning text-dark";
+            }
             badge.classList.remove('d-none');
         } else {
             badge.classList.add('d-none');
         }
+    } else {
+        console.error("❌ Elemento 'ui-badge-stato' non trovato nell'HTML!");
     }
 
-    // 4. Disegno Badge Tesseramento (FIR, UISP...)
-    if (typeof renderCodiciBadge === "function") {
-        renderCodiciBadge(idC);
-    }
+    // 7. Badge Codici FIR/UISP
+    if (typeof renderCodiciBadge === "function") renderCodiciBadge(idC);
 
-    // 5. Rendering del Form Dinamico
+    // 8. Rendering Form
+    const profileTarget = isAtleta ? "ATLETA" : "ASSOCIATO";
     const config = window.globalData.config[profileTarget] || [];
     renderAnagraficaForm(fullData, config, isAtleta);
 
-    // 6. GESTIONE TENDA CHIUSA DI DEFAULT
+    // 9. Gestione Tenda
     const collapseEl = document.getElementById('profile-collapse-area');
     if (collapseEl && window.bootstrap) {
-        const bsCollapse = window.bootstrap.Collapse.getOrCreateInstance(collapseEl);
-        bsCollapse.hide();
+        window.bootstrap.Collapse.getOrCreateInstance(collapseEl).hide();
     }
+
+    console.groupEnd();
 }
 
 /**
