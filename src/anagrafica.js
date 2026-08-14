@@ -45,7 +45,7 @@ export function buildFamilyUI(membri) {
 export function checkMemberValidation(index) {
     // Se index è -1, stiamo validando un nuovo inserimento (Wizard)
     const isWizard = (index === -1);
-    
+
     let fullData, isAtleta, profile;
 
     if (isWizard) {
@@ -97,18 +97,18 @@ export async function selectMember(index) {
         console.error("❌ Dati non pronti per l'indice:", index);
         return;
     }
-    
+
     const memberBase = window.globalData.famiglia.data[index];
     const idC = (memberBase.IDContatto || "").toString().toLowerCase().trim();
-    
+
     // --- LOGICA DI RICONOSCIMENTO GUIDATA DAL RUOLO ---
     // Leggiamo il ruolo e verifichiamo se contiene la parola "atleta"
     const ruoloStr = (getValue(memberBase, "Ruolo") || "").toLowerCase();
     const isAtleta = ruoloStr.includes("atleta");
-    
+
     // Scelta del profilo di configurazione
     const profileTarget = isAtleta ? "ATLETA" : "ASSOCIATO";
-    
+
     console.log(`%c 🎯 SELEZIONE: ${memberBase.Nome} `, "background: #1a2b3c; color: #fff; font-weight: bold;");
     console.log(`👤 Ruolo trovato: "${ruoloStr}"`);
     console.log(`✨ IsAtleta: ${isAtleta} | Profilo applicato: ${profileTarget}`);
@@ -175,124 +175,115 @@ export async function selectMember(index) {
     const collapseEl = document.getElementById('profile-collapse-area');
     if (collapseEl && window.bootstrap) {
         const bsCollapse = window.bootstrap.Collapse.getOrCreateInstance(collapseEl);
-        bsCollapse.hide(); 
+        bsCollapse.hide();
     }
 }
 
 /**
- * 5. RENDERING DEL FORM CON LOGICA DI LARGHEZZA E VALIDAZIONE LIVE
- */
-/**
- * DISEGNA IL FORM DINAMICO NEL DETTAGLIO PROFILO O NEL WIZARD
+ * DISEGNA IL FORM DINAMICO NEL DETTAGLIO PROFILO, NEL WIZARD O NELLO SHOP
  * @param {Object} memberData - Dati del socio (uniti)
- * @param {Array} config - Array campi del profilo (es. ATLETA o ASSOCIATO)
+ * @param {Array} config - Array campi del profilo
  * @param {Boolean} isAtleta - Flag per il filtro tecnico
- * @param {String} targetContainerId - ID del div dove iniettare il form
+ * @param {String} targetContainerId - ID del div di destinazione
+ * @param {Object} optionsOverride - (Nuovo) Oggetto per sovrascrivere le liste (es: { "Squadra": ["U14", "U16"] })
  */
-export function renderAnagraficaForm(memberData, config, isAtleta, targetContainerId = 'anagrafica-form-content') {
+export function renderAnagraficaForm(memberData, config, isAtleta, targetContainerId = 'anagrafica-form-content', optionsOverride = null) {
     const container = document.getElementById(targetContainerId);
-    if (!container) {
-        console.error(`❌ Container [${targetContainerId}] non trovato nell'HTML.`);
-        return;
-    }
+    if (!container) return;
 
     if (!config || config.length === 0) {
-        container.innerHTML = `<div class="p-4 text-center text-muted">Nessuna configurazione disponibile per questo profilo.</div>`;
+        container.innerHTML = `<div class="p-2 text-center text-muted small">Configurazione non disponibile.</div>`;
         return;
     }
 
-    // 1. ORDINAMENTO ESPLICITO (Basato sul campo 'ordine' migrato)
     const campiOrdinati = [...config].sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
 
-    // Iniziamo la costruzione dell'HTML
-    let html = '<div class="row g-3">';
+    // Usiamo g-2 invece di g-3 per ridurre lo spazio tra le colonne
+    let html = '<div class="row g-2">';
     let lastSection = "";
 
-    // 2. CICLO DI GENERAZIONE CAMPI
     campiOrdinati.forEach(conf => {
-        // FILTRO VISIBILITÀ GENERALE
         if (conf.visibile === false) return;
 
-        // FILTRO PROFILO: Se il campo è per atleti ma la persona non lo è, saltiamo
+        // Filtro Atleta (Se il campo è tecnico e l'utente non è atleta, salta)
         const tDato = (conf.tipoDato || "").toLowerCase().trim();
         if (tDato.includes("atleti") && !isAtleta) return;
 
-        // TITOLO SEZIONE (Compare solo quando l'etichetta 'sezione' cambia)
+        // Sezione compatta
         if (conf.sezione !== lastSection) {
             lastSection = conf.sezione;
-            html += `
-                <div class="col-12">
-                    <div class="rm-section-title mt-4 animate__animated animate__fadeIn">
-                        ${lastSection}
-                    </div>
-                </div>`;
+            html += `<div class="col-12"><div class="rm-section-title mt-2 mb-1" style="font-size:0.75rem; padding:4px 10px;">${lastSection}</div></div>`;
         }
 
-        // RECUPERO VALORE E VALIDAZIONE INIZIALE
+        // Recupero valore e validazione
         const valore = getValue(memberData, conf.id);
         const missing = isFieldMissing(conf, memberData, isAtleta);
-        
         const errorClass = missing ? "is-invalid" : "";
-        const asterisco = (conf.required && !conf.readonly) ? '<span class="text-danger fw-bold ms-1">*</span>' : '';
+        const asterisco = (conf.required && !conf.readonly) ? '<span class="text-danger fw-bold">*</span>' : '';
 
-        // IMPAGINAZIONE (3, 4, 6, 12)
+        // Override opzioni (per Squadre nello Shop)
+        let currentConf = { ...conf };
+        if (optionsOverride && optionsOverride[conf.id]) {
+            currentConf.opzioni = optionsOverride[conf.id];
+        }
+
         const colSize = conf.larghezza || 4;
-        const helpHtml = conf.sottotitolo ? `<span class="help-text">${conf.sottotitolo}</span>` : "";
+        const helpHtml = conf.sottotitolo ? `<span class="help-text" style="font-size:0.6rem;">${conf.sottotitolo}</span>` : "";
 
         html += `
-            <div class="col-md-${colSize} col-12 mb-2 animate__animated animate__fadeIn">
-                <label class="label-xs">
-                    ${conf.label}${asterisco} 
-                </label>
-                ${generaInputHtml(conf, valore, errorClass)}
+            <div class="col-md-${colSize} col-12 mb-1">
+                <label class="label-xs" style="font-size:0.65rem; margin-bottom:1px;">${conf.label}${asterisco}</label>
+                ${generaInputHtml(currentConf, valore, errorClass)}
                 ${helpHtml}
             </div>`;
     });
 
     html += '</div>';
 
-    // 3. AGGIUNTA TASTO SALVA (Solo se siamo nel portale, non nel wizard)
+    // Bottone Salva rimpicciolito (btn-sm)
     if (targetContainerId === 'anagrafica-form-content') {
         html += `
-            <div class="d-flex justify-content-end mt-5 pt-3 border-top">
-                <button class="btn btn-success fw-bold px-5 shadow-sm" onclick="salvaSchedaAttiva()">
-                    <i class="fas fa-save me-2"></i>SALVA TUTTE LE MODIFICHE
+            <div class="d-flex justify-content-end mt-3 pt-2 border-top">
+                <button class="btn btn-success btn-sm fw-bold px-4 shadow-sm" onclick="salvaSchedaAttiva()">
+                    <i class="fas fa-save me-1"></i> SALVA MODIFICHE
                 </button>
             </div>`;
     }
 
-    // Iniezione finale nel DOM
     container.innerHTML = html;
 
-    // 4. AGGANCIO LISTENER PER VALIDAZIONE LIVE
-    // Questo permette di togliere il rosso mentre si scrive e aggiornare le bolle
+    // Ri-aggancio listener (Invariato)
+    agganciaListenerValidazione(container);
+}
+
+
+// Funzione helper per non appesantire il render
+function agganciaListenerValidazione(container, targetContainerId) { // <--- Nome uniformato
     container.querySelectorAll('.val-field').forEach(el => {
         const validate = (e) => {
             const input = e.target;
             const fieldId = input.getAttribute('data-id');
             const isReq = input.hasAttribute('required');
-            
-            // Valore in base al tipo
+
+            // Valore reale
             const currentVal = input.type === 'checkbox' ? input.checked : input.value;
 
+            // Logica bordo rosso
             if (isReq) {
-                const empty = input.type === 'checkbox' ? !input.checked : (!input.value || input.value.trim() === "");
-                
-                if (empty) {
+                const isEmpty = input.type === 'checkbox' ? !input.checked : (!input.value || input.value.trim() === "");
+                if (isEmpty) {
                     input.classList.add('is-invalid');
-                    const img = document.getElementById(`prev_${fieldId}`);
-                    if(img) img.classList.add('img-invalid');
                 } else {
                     input.classList.remove('is-invalid');
-                    const img = document.getElementById(`prev_${fieldId}`);
-                    if(img) img.classList.remove('img-invalid');
                 }
             }
-            
-            // Se siamo nel portale, aggiorniamo la memoria e la bolla del familiare
+
+            // --- FIX ERRORE: Aggiorna memoria locale solo se siamo nel portale principale ---
             if (targetContainerId === 'anagrafica-form-content') {
-                window.globalData.famiglia.data[window.currentMemberIndex][fieldId] = currentVal;
-                checkMemberValidation(window.currentMemberIndex);
+                if (window.globalData && window.globalData.famiglia.data[window.currentMemberIndex]) {
+                    window.globalData.famiglia.data[window.currentMemberIndex][fieldId] = currentVal;
+                    checkMemberValidation(window.currentMemberIndex);
+                }
             }
         };
 
@@ -301,83 +292,94 @@ export function renderAnagraficaForm(memberData, config, isAtleta, targetContain
     });
 }
 
-// Funzione helper per non appesantire il render
-function agganciaListenerValidazione(container) {
-    container.querySelectorAll('.val-field').forEach(el => {
-        el.addEventListener('input', (e) => {
-            const input = e.target;
-            if (input.hasAttribute('required')) {
-                if (input.value && input.value.trim() !== "") input.classList.remove('is-invalid');
-                else input.classList.add('is-invalid');
-            }
-            const fieldId = input.getAttribute('data-id');
-            const currentVal = input.type === 'checkbox' ? input.checked : input.value;
-            window.globalData.famiglia.data[window.currentMemberIndex][fieldId] = currentVal;
-            checkMemberValidation(window.currentMemberIndex);
-        });
-    });
-}
-
 /**
  * 6. GENERATORE INPUT
  */
 function generaInputHtml(conf, valore, errorClass = "") {
-    const ro = conf.readonly ? "readonly disabled style='background-color: #f8f9fa;'" : "";
-    const rq = conf.required ? "required" : "";
+    const tipo = (conf.tipoInput || "testo").toLowerCase();
     const commonClass = `form-control form-control-sm val-field shadow-none ${errorClass}`;
+    const selectClass = `form-select form-select-sm val-field shadow-none ${errorClass}`;
+    const ro = conf.readonly ? "readonly disabled style='background-color: #f8f9fa; cursor: not-allowed;'" : "";
+    const rq = conf.required ? "required" : "";
     const v = (valore === null || valore === undefined) ? "" : valore;
 
-    switch ((conf.tipoInput || "testo").toLowerCase()) {
+    switch (tipo) {
         case "lista":
-            let opts = `<option value="">- Seleziona -</option>`;
-            (conf.opzioni || []).forEach(o => opts += `<option value="${o}" ${o == v ? 'selected' : ''}>${o}</option>`);
-            return `<select class="form-select form-select-sm val-field ${errorClass}" data-id="${conf.id}" ${conf.readonly ? 'disabled' : ''} ${rq}>${opts}</select>`;
+            const options = Array.isArray(conf.opzioni) ? conf.opzioni : [];
+            let optionsHtml = `<option value="">-</option>`;
+
+            // Il valore dell'anagrafica pulito (es. "U18, Cadetti" -> "u18, cadetti")
+            const valAnagrafica = v.toString().toLowerCase().trim();
+
+            options.forEach(o => {
+                const optStr = o.toString().trim();
+                const optLower = optStr.toLowerCase();
+                let isSelected = "";
+
+                // --- LOGICA RICHIESTA ---
+                // 1. Se la lista fornita dall'articolo ha solo 1 opzione, viene assegnata automaticamente
+                if (options.length === 1) {
+                    isSelected = "selected";
+                }
+                // 2. Se Matilde ha già quella squadra in anagrafica (anche tra tante), pre-seleziona
+                else if (valAnagrafica !== "" && valAnagrafica.includes(optLower)) {
+                    isSelected = "selected";
+                }
+
+                optionsHtml += `<option value="${optStr}" ${isSelected}>${optStr}</option>`;
+            });
+
+            return `<select class="${selectClass}" data-id="${conf.id}" ${conf.readonly ? 'disabled' : ''} ${rq}>${optionsHtml}</select>`;
+
         case "data":
             let ds = "";
             if (v) {
                 const s = v.toString();
-                if (s.includes('/')) { const p = s.split('/'); ds = `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; }
-                else { ds = s.split('T')[0]; }
+                if (s.includes('/')) {
+                    const p = s.split('/');
+                    if (p.length === 3) ds = `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
+                } else { ds = s.split('T')[0]; }
             }
             return `<input type="date" class="${commonClass}" data-id="${conf.id}" value="${ds}" ${ro} ${rq}>`;
-            case "switch":
-            case "checkbox":
-                    // --- LOG DI DEBUG (Rimuovere dopo il test) ---
-                    const isChecked = forceBool(valore);
-                    if (conf.id.toLowerCase().includes("privacy")) {
-                        console.log(`📡 Checkbox [${conf.id}]: Valore originale:`, valore, "-> Interpretato come:", isChecked);
-                    }
-        
-                    return `
-                        <div class="form-check form-switch pt-1">
-                            <input class="form-check-input val-field ${errorClass}" 
-                                   type="checkbox" 
-                                   role="switch"
-                                   data-id="${conf.id}" 
-                                   ${isChecked ? 'checked' : ''} 
-                                   ${conf.readonly ? 'disabled' : ''} 
-                                   ${conf.required ? 'required' : ''}>
-                        </div>`;
-                case "immagine":
-            const src = getThumbnailUrl(v);
-            const imgErr = errorClass ? "img-invalid" : "";
+
+        case "switch":
+        case "checkbox":
+            const isChecked = forceBool(v);
+
             return `
-                <div class="d-flex flex-column align-items-start gap-2">
-                    <div class="position-relative w-100" style="max-width: 250px;">
-                        <img src="${src}" id="prev_${conf.id}" class="img-doc-preview shadow-sm ${imgErr}" style="width: 100%; height: 150px; border-radius: 12px; object-fit: contain; background: #fdfdfd; cursor: pointer; border: 1px solid #dee2e6;" onclick="window.open('${v}','_blank')">
-                        ${!conf.readonly ? `<label for="file_${conf.id}" class="btn btn-dark btn-sm position-absolute bottom-0 end-0 m-2 rounded-pill px-3" style="font-size: 11px; cursor:pointer;"><i class="fas fa-camera"></i> CARICA</label><input type="file" id="file_${conf.id}" class="d-none" accept="image/*,application/pdf" onchange="handleFileUpload(this, '${conf.id}', '${conf.label}')">` : ''}
-                    </div>
-                    <input type="hidden" class="val-field ${errorClass}" data-id="${conf.id}" id="val_${conf.id}" value="${v}" ${conf.required ? 'required' : ''}>
+        <div class="form-check form-switch">
+            <input class="form-check-input val-field ${errorClass}" 
+                   type="checkbox" 
+                   role="switch" 
+                   data-id="${conf.id}" 
+                   ${isChecked ? 'checked' : ''} 
+                   ${conf.readonly ? 'disabled' : ''} 
+                   ${conf.required ? 'required' : ''}
+                   style="float: none; margin-left: 0;">
+        </div>`;
+
+        case "immagine":
+            const imgErr = errorClass ? "img-invalid" : "";
+            // Usa getThumbnailUrl se definita in utils.js
+            const thumb = (typeof getThumbnailUrl === "function") ? getThumbnailUrl(v) : v;
+            return `
+                <div class="d-flex align-items-center gap-2">
+                    <img src="${thumb || 'https://placehold.co/40x40?text=Doc'}" 
+                         id="prev_${conf.id}" class="img-doc-preview shadow-sm ${imgErr}" 
+                         style="width:40px;height:40px;border-radius:6px;object-fit:contain;" 
+                         onclick="window.open('${v}','_blank')">
+                    <input type="hidden" class="val-field ${errorClass}" data-id="${conf.id}" id="val_${conf.id}" value="${v}" ${rq}>
                 </div>`;
+
         default:
-            return `<input type="text" class="${commonClass}" data-id="${conf.id}" value="${v}" ${ro} ${rq}>`;
+            return `<input type="text" class="${commonClass}" data-id="${conf.id}" value="${v}" placeholder="..." ${ro} ${rq}>`;
     }
 }
 
 /**
  * 7. GESTORE UPLOAD (GOOGLE DRIVE)
  */
-window.handleFileUpload = async function(input, fieldId, label) {
+window.handleFileUpload = async function (input, fieldId, label) {
     const file = input.files[0];
     if (!file) return;
 
@@ -392,7 +394,7 @@ window.handleFileUpload = async function(input, fieldId, label) {
         reader.readAsDataURL(file);
         reader.onload = async (e) => {
             const base64Data = e.target.result;
-            
+
             // Facciamo vedere l'immagine all'utente SUBITO
             if (preview) {
                 preview.src = base64Data;
@@ -410,28 +412,28 @@ window.handleFileUpload = async function(input, fieldId, label) {
 
             try {
                 // 2. INVIO AL SERVER
-                const res = await callGAS("uploadDocumento", { 
-                    base64: base64Data, 
-                    filename: filename 
+                const res = await callGAS("uploadDocumento", {
+                    base64: base64Data,
+                    filename: filename
                 });
 
                 if (res && res.url) {
                     if (hiddenInput) {
                         hiddenInput.value = res.url;
                         // Forziamo l'aggiornamento manuale del valore nel campo
-                        hiddenInput.setAttribute('value', res.url); 
+                        hiddenInput.setAttribute('value', res.url);
                     }
                     if (preview) preview.src = getThumbnailUrl(res.url);
-                
+
                     // --- SINCRONIZZAZIONE CACHE IMMEDIATA ---
                     const idC = member.IDContatto.toString().toLowerCase();
-                    
+
                     // Aggiorniamo il campo ovunque possa trovarsi
                     member[fieldId] = res.url; // Aggiorna anagrafica
                     if (window.globalData.atleti[idC]) window.globalData.atleti[idC][fieldId] = res.url;
                     if (window.globalData.taglieKit[idC]) window.globalData.taglieKit[idC][fieldId] = res.url;
                     if (window.globalData.privacyData[idC]) window.globalData.privacyData[idC][fieldId] = res.url;
-                
+
                     // Ricalcola subito la validazione
                     checkMemberValidation(window.currentMemberIndex);
                     alert("✅ Immagine pronta. Ricorda di cliccare SALVA in fondo per confermare.");
@@ -466,10 +468,10 @@ function isMissingStyle(val, conf) {
 /**
  * 8. SALVATAGGIO SCHEDA (Via GAS Bridge)
  */
-window.salvaSchedaAttiva = async function() {
+window.salvaSchedaAttiva = async function () {
     const btn = document.querySelector('button[onclick="salvaSchedaAttiva()"]');
     const originalText = btn.innerHTML;
-    
+
     // Recuperiamo il membro attuale
     const member = window.globalData.famiglia.data[window.currentMemberIndex];
     const idC = member.IDContatto;
@@ -482,16 +484,16 @@ window.salvaSchedaAttiva = async function() {
         // 1. RACCOLTA DATI
         const fields = document.querySelectorAll('.val-field');
         // Includiamo l'ID_Famiglia affinché GAS possa creare nuove righe correttamente
-        const payload = { 
+        const payload = {
             idContatto: member.IDContatto,
-            ID_Famiglia: window.globalData.idFamiglia 
+            ID_Famiglia: window.globalData.idFamiglia
         };
-        
+
         fields.forEach(f => {
             const id = f.getAttribute('data-id');
             const val = f.type === 'checkbox' ? f.checked : f.value;
             payload[id] = val;
-            
+
             // Sincronizza tutta la memoria locale per evitare "bolle rosse" post-salvataggio
             const idC = member.IDContatto.toString().toLowerCase();
             member[id] = val;
@@ -499,7 +501,7 @@ window.salvaSchedaAttiva = async function() {
             if (window.globalData.taglieKit[idC]) window.globalData.taglieKit[idC][id] = val;
             if (window.globalData.privacyData[idC]) window.globalData.privacyData[idC][id] = val;
         });
-    
+
         console.log("📤 Invio payload a GAS:", payload);
 
         // 3. CHIAMATA AL PONTE
@@ -507,7 +509,7 @@ window.salvaSchedaAttiva = async function() {
 
         if (res && res.success) {
             alert("✅ Dati salvati con successo nello Spreadsheet!");
-            
+
             // 4. RE-VALIDAZIONE BOLLE
             // Se l'utente ha riempito i campi mancanti, la bolla deve diventare verde
             if (typeof checkMemberValidation === "function") {
@@ -525,9 +527,6 @@ window.salvaSchedaAttiva = async function() {
     }
 };
 
-// Esposizione Globale
-window.buildFamilyUI = buildFamilyUI;
-window.selectMember = selectMember;
 
 /**
  * Disegna la lista dei codici di tesseramento (FIR, UISP...)
@@ -556,7 +555,7 @@ function renderCodiciBadge(idSocio) {
     container.innerHTML = codiciMembro.map(c => {
         const ente = c.Tipo_Tesseramento || c.Ente || "INFO";
         const codice = c.Codice || "-";
-        
+
         return `
             <div class="registration-badge animate__animated animate__fadeInRight mb-1">
                 <div class="reg-type" style="background:#1a2b3c; color:white; padding:2px 8px; font-size:10px; font-weight:800; border-radius:4px 0 0 4px;">${ente}</div>
@@ -575,19 +574,16 @@ function isFieldMissing(conf, memberData, isAtleta) {
 
     if (conf.required) {
         const val = getValue(memberData, conf.id);
-        
-        // Se è una checkbox, è mancante solo se forceBool restituisce FALSE
+
+        // --- LOGICA SPECIFICA PER CHECKBOX/SWITCH ---
         if (conf.tipoInput === "switch" || conf.tipoInput === "checkbox") {
-            return !forceBool(val); 
-        }
-        const vStr = (val !== null && val !== undefined) ? val.toString().trim() : "";
-        
-        // Se è uno switch/checkbox obbligatorio, deve essere true
-        if (conf.tipoInput === "switch" || conf.tipoInput === "checkbox") {
-            return val !== true;
+            // È "mancante" se non è spuntata (quindi se forceBool è false)
+            return !forceBool(val);
         }
 
-        if (vStr === "" || vStr === "01/01/1900" || vStr === "1900-01-01") return true;
+        // Logica per campi testo/data
+        const vStr = (val !== null && val !== undefined) ? val.toString().trim() : "";
+        return (vStr === "" || vStr === "01/01/1900" || vStr === "1900-01-01");
     }
     return false;
 }
@@ -608,10 +604,10 @@ function parseBool(val) {
  * Forza qualunque valore (SÌ, VERO, TRUE, 1) a diventare un booleano Javascript true/false
  */
 function forceBool(val) {
-    if (val === true || val === 1 || val === "true") return true;
+    if (val === true || val === 1 || val === "true" || val === "TRUE") return true;
     if (typeof val === "string") {
         const s = val.toUpperCase().trim();
-        return s === "TRUE" || s === "VERO" || s === "SÌ" || s === "SI" || s === "1";
+        return s === "SÌ" || s === "SI" || s === "VERO" || s === "TRUE" || s === "1";
     }
     return false;
 }
@@ -619,7 +615,7 @@ function forceBool(val) {
 /**
  * Gestore universale per il lancio delle funzionalità
  */
-window.execFunzione = function(link, tipo, titolo) {
+window.execFunzione = function (link, tipo, titolo) {
     if (!link || link === "undefined" || link === "") {
         console.error("❌ Errore: URL non configurato per", titolo);
         alert("Configurazione URL mancante per questo servizio.");
@@ -627,7 +623,7 @@ window.execFunzione = function(link, tipo, titolo) {
     }
 
     const tipoPuro = (tipo || "IFRAME").toString().toUpperCase().trim();
-    
+
     // 1. RECUPERO DATI PER I SEGNAPOSTO (<EMAIL>, <FAMIGLIA>, <CONTATTO>)
     const selectedMember = window.globalData.famiglia.data[window.currentMemberIndex];
     const params = {
@@ -640,7 +636,7 @@ window.execFunzione = function(link, tipo, titolo) {
     let finalUrl = resolveUrlParams(link, params);
 
     // --- 3. LOGICA ANTI-MULTILOGIN E STABILIZZAZIONE URL ---
-    
+
     // A. Rimuoviamo il prefisso organizzativo (es. /a/rugbymilano.it/) 
     // Spesso causa redirect infiniti negli Iframe
     finalUrl = finalUrl.replace(/\/a\/macros\/[^\/]+\//, "/macros/");
@@ -651,12 +647,12 @@ window.execFunzione = function(link, tipo, titolo) {
 
     // C. Aggiungiamo i parametri di stabilità per Google
     const separator = finalUrl.includes('?') ? '&' : '?';
-    
+
     // Forza Google a usare la sessione attiva corrente (authuser=0)
     if (!finalUrl.includes('authuser')) {
         finalUrl += `${separator}authuser=0`;
     }
-    
+
     // Suggerisce il dominio Hosted (hd) per ridurre i check di sicurezza inutili
     if (!finalUrl.includes('hd=')) {
         finalUrl += `&hd=rugbymilano.it`;
@@ -671,20 +667,20 @@ window.execFunzione = function(link, tipo, titolo) {
 
     if (tipo === "REDIRECT") {
         console.log("📦 Impacchettamento dati per app satellite...");
-        
+
         // Creiamo il pacchetto prendendo tutto quello che abbiamo in globalData
         const dataToPass = {
             ...window.globalData,
             selectedMemberIndex: window.currentMemberIndex
         };
-    
+
         // Salvataggio nel sessionStorage
         sessionStorage.setItem('myoval_shared_data', JSON.stringify(dataToPass));
-    
+
         console.log("🚀 Reindirizzamento a:", link);
-        window.location.href = link; 
+        window.location.href = link;
     }
-    
+
     // 4. ESECUZIONE LANCIO
     else if (tipoPuro === "EXTERNAL" || tipoPuro === "URL") {
         // --- CASO ESTERNO: Nuova Scheda ---
@@ -699,17 +695,17 @@ window.execFunzione = function(link, tipo, titolo) {
         if (dashboard && serviceView && iframe) {
             // Nascondiamo la dashboard centrale
             dashboard.style.setProperty('display', 'none', 'important');
-            
+
             // Mostriamo l'area servizio a tutto schermo
             serviceView.classList.remove('d-none');
             serviceView.style.setProperty('display', 'flex', 'important');
-            
+
             if (titleLabel) titleLabel.innerText = titolo;
-            
+
             // Carichiamo l'URL stabilizzato nell'Iframe
             console.log("📡 Iniezione URL nell'Iframe...");
             iframe.src = finalUrl;
-            
+
             // Portiamo la pagina in cima
             window.scrollTo(0, 0);
         } else {
@@ -723,7 +719,7 @@ window.execFunzione = function(link, tipo, titolo) {
 /**
  * CHIUSURA SERVIZIO: Torna alla dashboard e pulisce l'Iframe
  */
-window.closeService = function() {
+window.closeService = function () {
     const dashboard = document.getElementById('dashboard-view');
     const serviceView = document.getElementById('service-view');
     const iframe = document.getElementById('service-iframe');
@@ -743,7 +739,7 @@ window.closeService = function() {
     }
 };
 
-window.execFunzioneOLD = function(link, tipo, titolo) {
+window.execFunzioneOLD = function (link, tipo, titolo) {
     if (!link || link === "undefined") {
         alert("Configurazione URL mancante per: " + titolo);
         return;
@@ -797,7 +793,7 @@ export function buildFunzioniUI(lista) {
 
     container.innerHTML = listaOrdinata.map((f, index) => {
         const icona = f.tipo === 'IFRAME' ? 'fa-window-maximize' : 'fa-external-link-alt';
-        
+
         // Usiamo un indice per recuperare i dati dall'array globale ed evitare problemi di apici nell'URL
         return `
             <div class="col-6 col-md-4">
@@ -813,7 +809,7 @@ export function buildFunzioniUI(lista) {
 
 // Rendiamo le funzioni globali per l'HTML
 window.buildFunzioniUI = buildFunzioniUI;
-window.closeService = function() {
+window.closeService = function () {
     document.getElementById('service-view').classList.add('d-none');
     document.getElementById('service-view').style.display = 'none';
     document.getElementById('dashboard-view').classList.remove('d-none');
@@ -824,7 +820,7 @@ window.closeService = function() {
 /**
  * Funzione intermedia per recuperare i dati corretti prima del lancio
  */
-window.selectAndExecFunzione = function(index) {
+window.selectAndExecFunzione = function (index) {
     const funz = window.globalData.funzioni[index];
     if (funz) {
         // Passiamo i dati puliti alla funzione di lancio
@@ -833,3 +829,9 @@ window.selectAndExecFunzione = function(index) {
         console.error("❌ Indice funzione non trovato in globalData:", index);
     }
 };
+
+// ESPOSIZIONE GLOBALE (Aggiungi questa riga se manca)
+window.renderAnagraficaForm = renderAnagraficaForm;
+window.selectMember = selectMember;
+window.salvaSchedaAttiva = salvaSchedaAttiva;
+window.buildFamilyUI = buildFamilyUI;

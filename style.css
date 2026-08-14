@@ -1,63 +1,98 @@
-/* RESET RADICE - Inserisci all'inizio del file style.css */
-html, body {
+/* ============================================================
+   1. VARIABILI E RESET RADICE
+   ============================================================ */
+:root {
+  --brand: #a00000;
+  /* Rosso Rugby Milano */
+  --brand-dark: #1a2b3c;
+  /* Blu Notte */
+  --bg-light: #f4f7f6;
+  /* Grigio Sfondo */
+  --border-grey: #dee2e6;
+  --text-muted: #7f8c8d;
+}
+
+html,
+body {
   margin: 0 !important;
   padding: 0 !important;
   width: 100% !important;
   height: 100% !important;
   overflow-x: hidden;
+  background-color: var(--bg-light);
+  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
+/* Spazio per la navbar fissa */
+body {
+  padding-top: 75px !important;
+}
+
+/* ============================================================
+   2. NAVBAR (HEADER)
+   ============================================================ */
 .navbar {
   position: fixed !important;
   top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
+  left: 0;
+  right: 0;
   width: 100% !important;
   height: 65px !important;
-  z-index: 3000 !important; /* Alziamo ancora di più lo z-index */
+  /* Abbassiamo la navbar a 1000 (standard Bootstrap) */
+  z-index: 1030 !important;
   background-color: #a00000 !important;
-  border: none !important;
 }
 
-/* Distanza tra Header e Contenuto */
-#dashboard-view {
-  margin-top: 40px !important; /* Aumenta questo valore se vuoi ancora più spazio */
+/* Il backdrop (lo sfondo scuro del modale) deve stare sopra la navbar */
+.modal-backdrop {
+  z-index: 1040 !important;
 }
 
-/* Spazio per il contenuto per non finire sotto la barra */
-#main-content-wrapper {
-  padding-top: 20px;
+/* Il modale deve stare sopra lo sfondo scuro */
+.modal {
+  z-index: 1050 !important;
 }
 
-/* IMPORTANTE: Se hai dei div sopra la navbar, forzali a non occupare spazio visivo */
-#loading-overlay, #global-error-container {
-  position: fixed;
-  top: 0;
-  left: 0;
+/* Se hai usato l'ID specifico per lo shop */
+#modalConfiguratore {
+  z-index: 1060 !important;
 }
 
-/* Add styles here */
-:root {
-  --brand-red: #a00000;
+#modalConfiguratore .modal-header {
+  padding-top: 20px !important;
+  padding-bottom: 10px !important;
 }
 
-/* Card più stretta e meno alta */
+.header-logo {
+  height: 42px;
+  width: auto;
+  filter: drop-shadow(0px 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+.navbar-brand img {
+  mix-blend-mode: multiply;
+  /* Fonde il bianco del logo con il rosso */
+}
+
+/* ============================================================
+   3. SCHERMATA LOGIN & AUTH (COMPATTA)
+   ============================================================ */
 .auth-card {
   background: white;
-  padding: 20px 25px; /* Ridotto da 40/30 */
+  padding: 20px 25px;
   border-radius: 16px;
   width: 100%;
-  max-width: 360px; /* Ridotto da 420 */
-  border-top: 6px solid var(--brand-red);
+  max-width: 360px;
+  border-top: 6px solid var(--brand);
 }
 
 .logo-compact {
-  height: 55px; /* Logo più piccolo */
+  height: 55px;
   width: auto;
 }
 
 .tab-btn {
-  padding: 6px; /* Più basso */
+  padding: 6px;
   font-size: 0.85rem;
 }
 
@@ -65,175 +100,91 @@ html, body {
   font-size: 0.75rem;
   font-weight: 700;
   color: #666;
-  margin-bottom: 2px;
   text-transform: uppercase;
 }
 
-.custom-input {
-  border-radius: 6px;
-  padding: 6px 10px;
-}
-
-/* Pulsanti più sottili */
-.btn-brand-compact {
-  background-color: var(--brand-red);
-  color: white;
+.btn-brand-compact,
+.btn-staff-solid-compact {
+  background-color: var(--brand);
+  color: white !important;
   border: none;
-  padding: 10px;
   font-weight: bold;
   border-radius: 8px;
-  font-size: 0.95rem;
+  transition: 0.3s;
 }
 
-.btn-staff-solid-compact {
-  background-color: var(--brand-red);
-  color: white !important;
-  border: none;
-  padding: 8px;
-  border-radius: 8px;
-  font-size: 0.85rem;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.extra-small {
-  font-size: 0.65rem;
-}
-
-.auth-link-sm {
-  color: #6c757d;
-  font-size: 0.75rem;
-  text-decoration: underline;
-}
-
-.uppercase { text-transform: uppercase; letter-spacing: 0.5px; }
-
-.navbar-brand img {
-  mix-blend-mode: multiply; /* Questo fonde il bianco del logo con il rosso sotto */
-}
-/* Sistema il tasto ESCI per farlo risaltare */
-.btn-outline-light {
-  border: 1px solid rgba(255,255,255,0.5) !important;
-  color: white !important;
-  font-weight: bold !important;
-}
-
-.btn-outline-light:hover {
-  background-color: rgba(255,255,255,0.2) !important;
-}
-
-/* Classe specifica per il tastone Iscrizioni */
-.btn-iscrizioni-rugby {
-  background-color: var(--brand) !important;
-  color: white !important;
-  border: none !important;
-  border-radius: 20px !important;
-  transition: all 0.3s ease;
-  min-height: 80px;
-}
-
-.btn-iscrizioni-rugby:hover {
-  background-color: #800000 !important;
-  transform: translateY(-2px);
-  box-shadow: 0 8px 15px rgba(160, 0, 0, 0.2);
-}
-
-.btn-iscrizioni-rugby i {
-  color: white !important;
-}
-
-.btn-back-home { color: white !important; font-weight: 700; text-decoration: none; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 6px; margin-right: 15px; cursor: pointer; display: none; font-size: 0.85rem; }
-.main-card { background: white; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); padding: 30px; position: relative; border: none; margin-bottom: 25px; }
-/* Impedisce al nome di finire sotto i badge dei codici */
-.atleta-nome {
-  font-size: 1.8rem; /* Leggermente più piccolo per mobile */
-  font-weight: 800;
-  color: var(--brand-dark);
-  text-transform: uppercase;
-  padding-right: 140px; /* SPAZIO RISERVATO AI BADGE A DESTRA */
-  line-height: 1.2;
-}
-.badge-stato { display: inline-block; padding: 6px 16px; border-radius: 50px; font-weight: 800; font-size: 0.75rem; margin-bottom: 20px; text-transform: uppercase; }
-.label-xs { font-size: 0.65rem; font-weight: 800; color: #bbb; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
-.val-data { font-weight: 800; font-size: 0.95rem; color: #222; }
-#ui-codici-list { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-.registration-badge { display: inline-flex; align-items: stretch; background: white; border: 1px solid #ced4da; border-radius: 6px; overflow: hidden; }
-.ente-label { background: var(--brand-dark); color: #ffffff; padding: 3px 10px; font-size: 10px; font-weight: 800; text-transform: uppercase; display: flex; align-items: center; }
-.codice-val { color: var(--brand); background: #ffffff; padding: 3px 12px; font-size: 13px; font-weight: 800; display: flex; align-items: center; }
-.shop-section-title { font-size: 13px; font-weight: 800; color: var(--brand-dark); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 35px; margin-bottom: 20px; border-left: 5px solid var(--brand); padding-left: 12px; display: flex; align-items: center; }
-.category-tile { cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column; align-items: center; width: 110px; }
-.tile-img-box { width: 110px; height: 110px; border-radius: 15px; background: white; border: 1px solid #ddd; overflow: hidden; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; }
-.tile-img-box img { width: 100%; height: 100%; object-fit: cover; }
-.tile-name { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--brand-dark); text-align: center; line-height: 1.2; }
-.cart-integrated-card { background: white; border-radius: 15px; border: 2px solid #eee; overflow: hidden; }
-.discount-label { font-size: 9px; color: #198754; font-weight: 800; background: #e8f5e9; border: 1px solid #c3e6cb; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; display: inline-flex; align-items: center; }
+/* ============================================================
+   4. SELETTORE FAMIGLIA (BOLLE)
+   ============================================================ */
 .family-nav {
   display: flex;
   flex-direction: row;
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  justify-content: center;
   gap: 20px;
   padding: 15px 0;
-  scrollbar-width: none; /* Nasconde la scrollbar su Firefox */
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .family-nav::-webkit-scrollbar {
-  display: none; /* Nasconde la scrollbar su Chrome/Safari */
+  display: none;
 }
 
-/* Centra le bolle su schermi grandi se sono poche */
-@media (min-width: 768px) {
-  .family-nav {
-      justify-content: center;
-  }
+.family-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 80px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: 0.3s;
 }
 
-/* Spazio specifico sopra il selettore delle bolle */
-.family-header {
-  margin-top: 10px;
-  margin-bottom: 15px;
+.family-item.active {
+  opacity: 1;
+  transform: scale(1.1);
 }
 
-.family-item { display: flex; flex-direction: column; align-items: center; min-width: 80px; cursor: pointer; opacity: 0.6; transition: 0.3s; }
-.family-item.active { opacity: 1; transform: scale(1.1); }
-.avatar-circle { width: 55px; height: 55px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #eee; border: 3px solid transparent; font-size: 1.2rem; }
-.family-item.active .avatar-circle { border-color: var(--brand); background: white; color: var(--brand); }
-.footer-bar { background-color: var(--brand); color: white; padding: 12px 0; margin-top: auto; font-size: 0.8rem; }
-
-.selection-card-atleta:hover { border-color: #a00000 !important; background-color: #fff8f8; }
-.selection-card-genitore:hover { border-color: #1a2b3c !important; background-color: #f4f7f6; }
-
-/* Effetto pressione al click */
-.selection-card-atleta:active, .selection-card-genitore:active {
-  transform: scale(0.98);
+.avatar-circle {
+  width: 55px;
+  height: 55px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eee;
+  border: 2px solid var(--border-grey);
+  font-size: 1.2rem;
+  color: #999;
 }
 
-/* Badge per il Genitore Atleta (Icona piccola con cravatta) */
-.dual-role-indicator {
-position: absolute;
-bottom: -2px;
-right: -2px;
-background-color: var(--brand); /* Rosso Rugby Milano */
-color: white;
-width: 22px;
-height: 22px;
-border-radius: 50%;
-display: flex;
-align-items: center;
-justify-content: center;
-font-size: 10px;
-border: 2px solid white;
-z-index: 2;
+.family-item.active .avatar-circle {
+  border-color: var(--brand);
+  border-width: 3px;
+  background: white;
+  color: var(--brand);
 }
 
-/* Opzionale: se vogliamo che l'icona principale sia grigia per i genitori non atleti */
-.family-item:not(.active) .avatar-circle i.fa-user-tie {
-color: #6c757d;
+/* Stato validazione bolle */
+.family-item.is-valid-member .avatar-circle {
+  border-color: #28a745 !important;
 }
 
-/* Se la bolla è attiva, l'icona piccola diventa bianca su rosso */
-.family-item.active .dual-role-indicator {
-background-color: #1a2b3c; /* Cambia colore se attivo per evidenziare */
-border-color: white;
+.family-item.is-invalid-member .avatar-circle {
+  border-color: #dc3545 !important;
+}
+
+/* ============================================================
+   5. COMPONENTI FORM (INPUT, LABELS, TITOLI)
+   ============================================================ */
+.main-card {
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  padding: 30px;
+  position: relative;
+  border: none;
+  margin-bottom: 25px;
 }
 
 .rm-section-title {
@@ -248,336 +199,188 @@ border-color: white;
   letter-spacing: 1px;
 }
 
+.label-xs {
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #bbb;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.val-field {
+  font-size: 0.85rem !important;
+}
+
 .val-field:focus {
   border-color: var(--brand);
   box-shadow: 0 0 0 0.25rem rgba(160, 0, 0, 0.1);
 }
 
-.img-doc-preview {
-  transition: all 0.3s ease;
-  background-image: url('https://placehold.co/400x250?text=Nessun+Documento'); /* Background di fallback */
-  background-size: contain;
-  background-repeat: no-repeat;
-  background-position: center;
+.val-field.is-invalid {
+  background-color: #fff8f8 !important;
+  border: 1px solid #dc3545 !important;
 }
 
-.img-doc-preview:hover {
-  border-color: var(--brand) !important;
-  transform: translateY(-2px);
-  box-shadow: 0 5px 15px rgba(0,0,0,0.1) !important;
-}
-
-/* Pulsante piccolo per upload */
-.btn-xs {
-  padding: 1px 5px;
-  font-size: 10px;
-  line-height: 1.5;
-}
-
-.label-xs {
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: #6c757d;
-  text-transform: uppercase;
-  margin-bottom: 4px;
-  display: block;
-}
-
-/* Stile per il testo di aiuto sotto i campi */
+/* --- HELP TEXT (Sottotitoli compatti) --- */
 .help-text {
   display: block;
-  font-size: 0.65rem;
-  color: #888;
-  margin-top: 3px;
+  clear: both;
+  font-size: 0.65rem !important;
+  color: var(--text-muted);
   font-style: italic;
-  line-height: 1.2;
+  line-height: 1.1 !important;
+  /* Testo incollato */
+  margin-top: 2px !important;
+  margin-bottom: 8px !important;
 }
 
-/* Animazione per la freccia della tenda */
-[aria-expanded="true"] .transition-icon {
-  transform: rotate(180deg);
-  transition: 0.3s ease;
-}
-.transition-icon {
-  transition: 0.3s ease;
-}
-
-/* Servizi Online in versione compatta per il flusso centrale */
-#funzioni-container .card {
-  border: 1px solid #eee !important;
-  transition: 0.2s;
-}
-#funzioni-container .card:hover {
-  background-color: #f8f9fa;
-  transform: translateY(-2px);
+/* ============================================================
+   6. FIX DEFINITIVO SWITCH (ANTI-CERCHIO GIGANTE)
+   ============================================================ */
+.form-switch .form-check-input {
+  width: 2.2em !important;
+  height: 1.2em !important;
+  margin-top: 0.25em !important;
+  margin-bottom: 5px !important;
+  border-radius: 2em !important;
+  background-color: #fff;
+  border: 1px solid #ced4da;
+  cursor: pointer;
+  /* Pallino grigio default */
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='rgba%280, 0, 0, 0.25%29'/%3e%3c/svg%3e") !important;
 }
 
-.services-box {
-  background: #ffffff;
-  border-radius: 20px;
-  border: 1px solid #edf2f7;
+.form-switch .form-check-input:checked {
+  background-color: var(--brand) !important;
+  border-color: var(--brand) !important;
+  /* Pallino bianco quando acceso */
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e") !important;
 }
 
-/* Titolo anagrafica nella tenda */
-#ui-anagrafica-title {
-  letter-spacing: 0.5px;
+.form-switch .form-check-input.is-invalid {
+  background-color: #fff !important;
+  border-color: #dc3545 !important;
+  /* Pallino rosso quando obbligatorio e vuoto */
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23dc3545'/%3e%3c/svg%3e") !important;
 }
 
-/* Transizione freccia */
-.transition-icon {
-  transition: transform 0.3s ease;
-}
-[aria-expanded="true"] .transition-icon {
-  transform: rotate(180deg);
+/* ============================================================
+   7. SHOP (CATALOGO E CARRELLO)
+   ============================================================ */
+#shop-view {
+  margin-top: 5px !important;
+  font-size: 0.8rem;
 }
 
-/* Stile bottoni servizi dentro il box */
-.service-btn-compact {
-  background: #f8f9fa;
-  border-radius: 12px;
-  padding: 10px;
+.shop-category-container {
   display: flex;
-  align-items: center;
-  text-decoration: none !important;
-  transition: 0.2s;
-  border: 1px solid transparent;
+  flex-wrap: wrap;
+  gap: 12px !important;
+  padding: 0 10px;
 }
-.service-btn-compact:hover {
+
+.category-tile {
+  width: 90px !important;
+  text-align: center;
+}
+
+.tile-img-box {
+  width: 90px !important;
+  height: 90px !important;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #ddd;
   background: #fff;
-  border-color: var(--brand);
-  transform: translateY(-2px);
-}
-
-/* Piccole pillole tecniche accanto al badge */
-.tech-pill {
-  background: #f1f3f5;
-  padding: 4px 12px;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  font-weight: 700;
-  color: var(--brand-dark);
-  border: 1px solid #dee2e6;
-  white-space: nowrap;
-}
-
-.label-xxs {
-  font-size: 0.55rem;
-  color: #888;
-  display: block;
-  line-height: 1;
-  margin-bottom: 2px;
-}
-
-/* Badge Stato (Reset margini per allineamento) */
-.badge-stato {
-  padding: 6px 16px;
-  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-/* Bordi per le bolle della famiglia */
-.family-item.is-valid-member .avatar-circle {
-  border: 3px solid #28a745 !important; /* Verde */
-  box-shadow: 0 0 8px rgba(40, 167, 69, 0.3);
-}
-
-.family-item.is-invalid-member .avatar-circle {
-  border: 3px solid #dc3545 !important; /* Rosso */
-  box-shadow: 0 0 8px rgba(220, 53, 69, 0.3);
-}
-
-.val-field.is-invalid:focus {
-  box-shadow: 0 0 0 0.25rem rgba(220, 53, 69, 0.25) !important;
-}
-
-/* Forza il bordo rosso per i campi non validi */
-.val-field.is-invalid {
-  border-color: #dc3545 !important;
-  background-color: #fff8f8 !important;
-  box-shadow: 0 0 0 0.25rem rgba(220, 53, 69, 0.1) !important;
-}
-
-/* Bordo rosso per documenti obbligatori mancanti */
-.img-invalid {
-  border: 2px solid #dc3545 !important;
-  background-color: #fff8f8 !important;
-}
-
-/* Badge per i codici di tesseramento (FIR, UISP...) */
-.registration-badge {
-  display: inline-flex;
-  align-items: stretch;
-  background: white;
-  border: 1px solid #dee2e6;
-  border-radius: 6px;
-  overflow: hidden;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-  min-width: 120px;
-}
-
-.reg-type {
-  background: var(--brand-dark); /* Blu scuro */
-  color: white;
-  padding: 2px 8px;
-  font-size: 10px;
-  font-weight: 800;
+.tile-name {
+  font-size: 0.65rem !important;
+  font-weight: 700;
   text-transform: uppercase;
-  display: flex;
-  align-items: center;
-}
-
-.reg-val {
-  color: var(--brand); /* Rosso Rugby */
-  padding: 2px 10px;
-  font-size: 11px;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  font-family: 'Roboto Mono', monospace; /* Font tecnico per i numeri */
-}
-
-/* Stile per il logo nell'header */
-/* Sistema il contenitore del logo per togliere il rettangolo bianco se necessario */
-.header-logo {
-  height: 40px;
-  width: auto;
-  filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.2));
-}
-
-.header-logo:hover {
-  transform: scale(1.05);
-}
-
-/* Regolazione per schermi molto piccoli */
-@media (max-width: 576px) {
-  .atleta-nome {
-      font-size: 1.4rem;
-      padding-right: 0; /* Su mobile stretto i badge andranno sopra o sotto */
-      margin-top: 40px; /* Spostiamo il nome giù per far spazio ai badge */
-  }
-  
-  #ui-codici-list {
-      padding: 5px !important;
-  }
 }
 
 .product-row-card {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-  border: 1px solid #edf2f7 !important;
+  padding: 12px 18px !important;
+  border-radius: 14px !important;
+  border: 1px solid #e2e8f0 !important;
+  margin-bottom: 8px !important;
 }
 
 .product-row-card:hover {
-  transform: scale(1.01);
-  box-shadow: 0 8px 20px rgba(0,0,0,0.08) !important;
   border-color: var(--brand) !important;
+  transform: translateY(-2px);
 }
 
-.price-tag-shop {
-  font-family: 'Roboto Mono', monospace;
-  letter-spacing: -1px;
+/* --- DIVISORE CATALOGO CENTRATO --- */
+.shop-divider {
+  height: 1px;
+  background-color: #dee2e6;
+  margin: 40px 0 25px 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-#shop-view {
-  margin-top: 50px !important; /* Stessa distanza della dashboard */
-  padding-bottom: 50px;
+.shop-divider::after {
+  content: "CATALOGO ISCRIZIONI";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: -10px;
+  background: var(--bg-light);
+  padding: 0 20px;
+  color: #adb5bd;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 2px;
 }
 
-/* Assicuriamoci che il tasto di ritorno sia leggibile */
-.btn-outline-secondary {
-  transition: all 0.2s ease;
-}
-.btn-outline-secondary:hover {
-  background-color: var(--brand) !important;
-  color: white !important;
-  border-color: var(--brand) !important;
-}
-
-/* Arrotondamento breadcrumb shop */
-.breadcrumb {
-  margin-bottom: 0;
-}
-
-/* Personalizzazione elementi dentro il modale configuratore */
-#modalConfiguratore .form-check-input:checked {
-  background-color: var(--brand);
-  border-color: var(--brand);
-}
-
-#modalConfiguratore .form-select-sm {
-  border-radius: 8px;
-  border: 1px solid #ced4da;
-  font-size: 0.75rem;
-}
-
-#modalConfiguratore .modal-body {
-  max-height: 70vh; /* Permette lo scroll se la famiglia è numerosa */
-  overflow-y: auto;
-}
-
-/* Colore rosso del brand per i testi */
-.text-brand {
-  color: var(--brand-red) !important;
-}
-
-/* Bottone con bordo rosso e testo rosso */
-.btn-outline-brand {
-  border: 2px solid var(--brand-red);
-  color: var(--brand-red);
-  background: white;
-  padding: 12px;
-  border-radius: 8px;
-  transition: 0.3s;
-}
-
-.btn-outline-brand:hover {
-  background-color: var(--brand-red);
-  color: white;
-  border-color: var(--brand-red);
-}
-
-/* Utilità per testo molto piccolo */
-.extra-small {
-  font-size: 0.75rem;
-}
-
-/* Bottone STAFF - Versione Solid (Piena) */
-.btn-staff-solid {
-  background-color: var(--brand-red); /* Rosso Rugby Milano */
-  color: white !important;
-  border: none;
-  padding: 15px 20px; /* Più alto per una migliore interazione */
-  border-radius: 12px;
-  font-size: 0.95rem;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 6px rgba(160, 0, 0, 0.2); /* Ombra per profondità */
-}
-
-.btn-staff-solid:hover {
-  background-color: #800000; /* Rosso più scuro al passaggio */
-  box-shadow: 0 6px 12px rgba(160, 0, 0, 0.3);
-  transform: translateY(-2px); /* Effetto sollevamento */
-}
-
-.btn-staff-solid:active {
-  transform: translateY(0);
-  box-shadow: 0 2px 4px rgba(160, 0, 0, 0.2);
-}
-
-/* Assicuriamoci che il testo danger sia del rosso corretto */
-.text-danger {
-  color: var(--rm-red) !important;
+/* ============================================================
+   8. UTILITY, OVERLAYS E RESPONSIVE
+   ============================================================ */
+#loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(244, 247, 246, 0.95);
+  z-index: 9999 !important;
+  display: none;
+  /* <--- Aggiungi questo per farlo nascere spento */
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
 }
 
 #service-view {
   position: fixed;
-  top: 65px; /* Deve essere uguale all'altezza della navbar */
+  top: 65px;
   left: 0;
   width: 100%;
   height: calc(100vh - 65px);
-  z-index: 2000; /* Leggermente inferiore alla navbar che ha 2005 */
+  z-index: 2000;
+  background: white;
 }
 
+@media (max-width: 768px) {
+  .family-nav {
+    justify-content: flex-start;
+    padding-left: 10px;
+  }
+
+  .atleta-nome {
+    font-size: 1.4rem;
+    padding-right: 0;
+    margin-top: 40px;
+  }
+
+  .shop-category-container {
+    justify-content: center;
+  }
+}

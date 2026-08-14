@@ -1,39 +1,37 @@
-import { callGAS, formatEuro, getThumbnailUrl} from "./utils.js";
+import { auth } from "./firebase-config.js";
+import { onAuthStateChanged } from "firebase/auth";
+import { callGAS, formatEuro, getThumbnailUrl } from "./utils.js";
+import { renderAnagraficaForm } from "./anagrafica.js";
 
-// INIZIALIZZAZIONE GLOBALE SICURA
-window.cart = window.cart || []; 
+// --- STATO GLOBALE ---
+window.shopCatalog = null;
+window.cart = [];
+window.currentArtForConf = null;
+window.appliedCouponCode = "";
 window.couponFeedbackHTML = "";
-window.shopCatalog = window.shopCatalog || null;
+window.isDetrazioneActive = false;
+window.selectedGenitoreId = "";
+window.fiscalCF = "";
+window.fiscalEmail = "";
 
-console.log("🛒 Caricamento Modulo Shop...");
+onAuthStateChanged(auth, async (user) => {
+    if (user) {
+        const raw = sessionStorage.getItem('myoval_shared_data');
+        if (!raw) { window.location.href = "index.html"; return; }
+        window.globalData = JSON.parse(raw);
 
-/**
- * FUNZIONE GLOBALE AGGANCIATA AL TASTO HTML
- */
-window.handleIscrizioniClick = async function() {
-    console.log("🛒 Avvio procedura apertura Shop...");
+        const emailLabel = document.getElementById('user-email-display-shop');
+        if (emailLabel) emailLabel.innerText = window.globalData.userEmail;
 
-    // 1. Identificazione elementi UI
+        await inizializzaShop();
+    } else {
+        window.location.href = "index.html";
+    }
+});
+
+async function inizializzaShop() {
     const loader = document.getElementById('loading-overlay');
-    const shopView = document.getElementById('shop-view');
-    const dashboardView = document.getElementById('dashboard-view');
-
-    // 2. MOSTRA LO SPINNER IMMEDIATAMENTE (Forzato)
-    if (loader) {
-        loader.style.setProperty('display', 'flex', 'important');
-        const loaderText = loader.querySelector('h5');
-        if (loaderText) loaderText.innerText = "Sincronizzazione Catalogo...";
-    }
-
-    // 3. Validazione bolle famiglia
-    const bubbles = document.querySelectorAll('.family-item[id^="f-"]');
-    const allValid = Array.from(bubbles).every(b => b.classList.contains('is-valid-member'));
-
-    if (bubbles.length === 0 || !allValid) {
-        if (loader) loader.style.setProperty('display', 'none', 'important'); // Nascondi se fallisce validazione
-        alert("📢 ATTENZIONE: Completa le anagrafiche (bolle verdi) prima di procedere.");
-        return;
-    }
+    if (loader) loader.style.setProperty('display', 'flex', 'important');
 
     try {
         const params = {
@@ -43,190 +41,566 @@ window.handleIscrizioniClick = async function() {
             atleti: window.globalData.atleti
         };
 
-        // Chiamata al ponte GAS (che richiede qualche secondo)
         const res = await callGAS("getShopPortalDataWithCart", params);
-        
         if (!res || !res.success) throw new Error(res ? res.error : "Errore catalogo");
 
         window.shopCatalog = res;
-        
-        // Mappatura carrello... (tieni la logica esistente)
-        window.cart = (res.persistedCart || []).map(item => ({
-            idContatto: (item.ID_Contatto || item.idContatto || "").toString(),
-            nomeMembro: item.Nome_Membro || item.nomeMembro || "",
-            idArticolo: (item.ID_Articolo || item.idArticolo || "").toString(),
-            nomeArticolo: item.Nome_Articolo || item.nomeArticolo || "",
-            idCategoria: (item.ID_Categoria || item.idCategoria || "").toString(),
-            metadati: item.Metadati_JSON || {},
-            addedAt: item.Data_Aggiunta || Date.now(),
-            prezzoBase: 0, finalPrice: 0, scontiDettaglio: []
-        }));
 
-        // Cambio vista
-        if (dashboardView) {
-            dashboardView.classList.add('d-none');
-            dashboardView.style.setProperty('display', 'none', 'important');
-        }
-        
-        if (shopView) {
-            shopView.classList.remove('d-none');
-            shopView.style.setProperty('display', 'block', 'important');
-        }
+        // --- MAPPING CARRELLO CON RECUPERO TITOLO ARTICOLO ---
+        window.cart = (res.persistedCart || []).map(item => {
+            const artId = (item.ID_Articolo || item.idArticolo || "").toString();
 
-        // Avvio logica shop
+            // Cerchiamo i dettagli dell'articolo nel catalogo scaricato per prendere il Titolo
+            const artInfo = (res.articoli || []).find(a => a.ID_Articolo === artId);
+
+            // Logica di priorità nome: Titolo Visualizzato -> Nome Tecnico -> Valore da Spreadsheet
+            const nomeDaVisualizzare = artInfo ?
+                (artInfo.Titolo_Articolo || artInfo.Nome_Articolo) :
+                (item.Nome_Articolo || item.nomeArticolo || "Articolo");
+
+            return {
+                idContatto: (item.ID_Contatto || item.idcontatto || "").toString(),
+                nomeMembro: item.Nome_Membro || item.nomemembro || "",
+                idArticolo: artId,
+                // --- APPLICAZIONE MODIFICA ---
+                nomeArticolo: nomeDaVisualizzare,
+                idCategoria: (item.ID_Categoria || item.idcategoria || "").toString(),
+                metadati: item.Metadati_JSON || {},
+                addedAt: item.Data_Aggiunta || Date.now(),
+                prezzoBase: 0,
+                finalPrice: 0,
+                scontiDettaglio: []
+            };
+        });
+
+        console.log(`🛒 Carrello sincronizzato con ${window.cart.length} articoli.`);
+
         window.recalculateCart();
         window.renderShopHome();
 
     } catch (e) {
-        console.error("❌ Errore Shop:", e);
-        alert("Impossibile caricare lo shop: " + e.message);
+        console.error("Errore inizializzazione:", e);
+        alert("Errore: " + e.message);
     } finally {
-        // 4. NASCONDI LO SPINNER ALLA FINE
-        if (loader) {
-            loader.style.setProperty('display', 'none', 'important');
-        }
+        if (loader) loader.style.setProperty('display', 'none', 'important');
     }
+}
+
+/**
+ * DISEGNA LA RICEVUTA DEL CARRELLO SOPRA IL CATALOGO
+ */
+window.renderCartUI = function () {
+    const container = document.getElementById('cart-integrated-container');
+    const divider = document.getElementById('ui-shop-divider');
+    const countEl = document.getElementById('cart-count');
+
+    if (!container) return;
+
+    // 1. Se il carrello è vuoto, nascondi tutto
+    if (!window.cart || window.cart.length === 0) {
+        container.style.setProperty('display', 'none', 'important');
+        if (divider) divider.classList.add('d-none');
+        if (countEl) countEl.innerText = "0";
+        return;
+    }
+
+    // 2. Forza la visualizzazione
+    container.classList.remove('d-none');
+    container.style.setProperty('display', 'block', 'important');
+    if (divider) divider.classList.remove('d-none');
+    if (countEl) countEl.innerText = window.cart.length;
+
+    // 3. Calcolo Totale e Filtro Adulti
+    const total = window.cart.reduce((s, i) => s + (parseFloat(i.finalPrice) || 0), 0);
+    const membri = Array.isArray(window.shopCatalog.famiglia)
+        ? window.shopCatalog.famiglia
+        : (window.shopCatalog.famiglia?.data || []);
+
+    const adulti = membri.filter(m => {
+        const r = (m.Ruolo || "").toUpperCase();
+        return r.includes("GENITORE") || r.includes("SOCIO") || r.includes("CONSIGLIERE");
+    });
+
+    // 4. Generazione Righe con SCONTI AL CENTRO
+    const htmlRows = window.cart.map((item, index) => {
+        // Prepariamo l'HTML degli sconti
+        const sctHtml = (item.scontiDettaglio || []).map(s => `
+            <div class="text-success fw-bold text-nowrap" style="font-size: 9px;">
+                <i class="fas fa-tag"></i> -${formatEuro(s.valore)}
+                <div class="text-muted" style="font-size: 7px; font-weight: normal;">${s.nome}</div>
+            </div>`).join('');
+
+        let metaHtml = "";
+        if (item.metadati) {
+            if (item.metadati.squadra) metaHtml += `<span class="badge bg-light text-dark border me-1" style="font-size: 8px;">${item.metadati.squadra}</span>`;
+            if (item.metadati.tagliaMaglia) metaHtml += `<small class="text-muted" style="font-size: 9px;">Kit: ${item.metadati.tagliaMaglia}</small>`;
+        }
+
+        return `
+        <tr style="border-bottom: 1px solid #f0f0f0;">
+            <!-- Colonna 1: Articolo e Beneficiario -->
+            <td class="ps-3 py-2" style="width: 40%;">
+                <div class="fw-bold text-dark" style="font-size:13px; line-height: 1.1;">${item.nomeArticolo}</div>
+                <div style="font-size:10px;">Per: <span class="text-danger fw-bold">${item.nomeMembro}</span></div>
+                <div class="mt-1">${metaHtml}</div>
+            </td>
+
+            <!-- Colonna 2: Prezzo Base (nascosto su mobile piccolo) -->
+            <td class="text-center text-muted d-none d-md-table-cell" style="font-size:11px; width: 15%;">
+                ${formatEuro(item.prezzoBase)}
+            </td>
+
+            <!-- Colonna 3: SCONTI (AL CENTRO) -->
+            <td class="text-center py-2" style="width: 25%;">
+                ${sctHtml || '<span class="text-muted" style="font-size: 10px;">-</span>'}
+            </td>
+
+            <!-- Colonna 4: Prezzo Finale -->
+            <td class="text-end py-2 pe-3" style="width: 15%;">
+                <div class="fw-bold text-dark" style="font-size:0.95rem;">${formatEuro(item.finalPrice)}</div>
+            </td>
+
+            <!-- Colonna 5: Azione -->
+            <td class="text-center" style="width: 5%;">
+                <button class="btn btn-sm btn-link text-danger p-0" onclick="window.removeAndRefresh(${index})">
+                    <i class="fas fa-times-circle"></i>
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    // 5. Iniezione HTML Finale (Con Intestazioni Sottili per chiarezza colonne)
+    container.innerHTML = `
+    <div class="card shadow-sm mb-3" style="border-radius: 12px; overflow: hidden; border: 1px solid #ddd;">
+      
+      <div class="p-2 bg-dark text-white d-flex justify-content-between align-items-center">
+        <h6 class="mb-0 fw-bold small ms-2"><i class="fas fa-shopping-cart me-2 text-danger"></i>RIEPILOGO ISCRIZIONE</h6>
+        <span class="badge bg-danger rounded-pill me-2" style="font-size:10px;">${window.cart.length} Articoli</span>
+      </div>
+      
+      <div class="table-responsive bg-white">
+        <table class="table table-hover align-middle mb-0" style="table-layout: fixed; width: 100%;">
+          <thead class="bg-light">
+            <tr style="font-size: 9px; text-transform: uppercase; color: #999; border-bottom: 1px solid #eee;">
+               <th class="ps-3 py-1">Beneficiario</th>
+               <th class="text-center py-1 d-none d-md-table-cell">Listino</th>
+               <th class="text-center py-1">Sconti</th>
+               <th class="text-end pe-3 py-1">Totale</th>
+               <th style="width: 40px;"></th>
+            </tr>
+          </thead>
+          <tbody>${htmlRows}</tbody>
+        </table>
+      </div>
+
+      <!-- Area Coupon e Detrazione -->
+      <div class="p-2 bg-white border-top">
+        <div class="row g-2 align-items-center">
+          <div class="col-md-5">
+            <div class="input-group input-group-sm">
+                <input type="text" id="cart_coupon_input" class="form-control form-control-sm" placeholder="Codice Coupon" value="${window.appliedCouponCode || ''}">
+                <button class="btn btn-dark btn-sm fw-bold" onclick="window.applyCoupon()">APPLICA</button>
+            </div>
+            <div id="coupon_feedback">${window.couponFeedbackHTML || ''}</div>
+          </div>
+          <div class="col-md-7 border-start ps-3">
+            <div class="form-check form-switch m-0 d-flex align-items-center">
+                <input class="form-check-input" type="checkbox" id="f_detrazione_attiva" 
+                       onchange="window.toggleDetrazioneUI(this.checked)" 
+                       ${window.isDetrazioneActive ? 'checked' : ''} 
+                       style="transform: scale(0.85); margin-right: 10px;">
+                <label class="form-check-label fw-bold text-dark" for="f_detrazione_attiva" style="font-size: 11px;">Detrazione fiscale (730)</label>
+            </div>
+            <div id="detrazione-fields-ui" class="${window.isDetrazioneActive ? '' : 'd-none'} mt-1">
+                <select id="f_genitore_detrazione" class="form-select form-select-sm" style="font-size: 10px;" onchange="window.autoFillFiscalData(this.value)">
+                    <option value="">Intesta la ricevuta a...</option>
+                    ${adulti.map(a => `<option value="${a.IDContatto}" ${window.selectedGenitoreId == a.IDContatto ? 'selected' : ''}>${a.Cognome} ${a.Nome}</option>`).join('')}
+                </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-2 bg-light border-top d-flex justify-content-between align-items-center">
+        <div class="ps-2">
+            <small class="text-muted text-uppercase fw-bold d-block" style="font-size:9px; line-height: 1;">Totale da pagare:</small>
+            <div class="h4 fw-bold text-danger mb-0" style="font-family: monospace;">${formatEuro(total)}</div>
+        </div>
+        <button class="btn btn-success fw-bold px-4 py-2 rounded-pill shadow-sm" style="font-size: 11px; letter-spacing: 0.5px;" onclick="window.checkout()">
+          CONFERMA E PROCEDI <i class="fas fa-arrow-right ms-1"></i>
+        </button>
+      </div>
+    </div>`;
+};
+
+window.updateCartUI = function () {
+    const total = window.cart.reduce((s, i) => s + (i.finalPrice || 0), 0);
+    const countEl = document.getElementById('cart-count');
+    if (countEl) countEl.innerText = window.cart.length;
 };
 
 /**
- * MOTORE DI IDONEITÀ (Eligibility Engine)
- * Determina se un atleta può visualizzare/acquistare un determinato articolo
+ * RENDER ARTICOLI DELLA CATEGORIA SELEZIONATA
  */
-window.checkEligibility = function(art, atleta) {
-    // 0. Protezione: se mancano i dati, non è idoneo
-    if (!art || !atleta) return false;
+window.openShopCategory = function (idCat) {
+    if (!window.shopCatalog) return;
+    const cat = window.shopCatalog.categorie.find(c => c.ID_Categoria === idCat);
+    if (!cat) return;
 
-    // 1. STATO PUBBLICAZIONE
-    // Se l'articolo non è "Live", nessuno lo vede
+    document.getElementById('shop-breadcrumb')?.classList.remove('d-none');
+    const labelHome = document.getElementById('breadcrumb-label-home');
+    if (labelHome) labelHome.innerText = "Torna al Catalogo";
+    const labelCurrent = document.getElementById('breadcrumb-current');
+    if (labelCurrent) labelCurrent.innerText = cat.Nome_Categoria;
+
+    const membri = Array.isArray(window.shopCatalog.famiglia) ? window.shopCatalog.famiglia : (window.shopCatalog.famiglia?.data || []);
+    const articoliIdonei = (window.shopCatalog.articoli || []).filter(a =>
+        a.ID_Categoria === idCat && membri.some(m => window.checkEligibility(a, m))
+    );
+
+    const container = document.getElementById('shop-content-area');
+
+    let html = `
+        <div class="mb-4 animate__animated animate__fadeIn">
+            <button class="btn btn-outline-secondary btn-sm rounded-pill px-3 shadow-sm mb-3" 
+                    onclick="window.renderShopHome()" 
+                    style="font-size: 0.7rem; font-weight: bold; border: 1px solid #cbd5e0;">
+                <i class="fas fa-th-large me-2"></i> TORNA AL CATALOGO
+            </button>
+            <h3 class="fw-bold text-dark mb-4 ms-1">${cat.Nome_Categoria}</h3>
+        </div>
+        <div class="row g-2 animate__animated animate__fadeIn">`;
+
+    if (articoliIdonei.length === 0) {
+        html += '<div class="col-12 text-center p-5 text-muted">Nessun articolo disponibile.</div>';
+    } else {
+        articoliIdonei.forEach(art => {
+            const lp = window.calculateLivePrice(art);
+            const pDisp = lp.isValid ? formatEuro(lp.price) : `<span class="text-muted small">NON DISPONIBILE</span>`;
+
+            // Logica per calcolare la fascia d'età
+            const minAnno = Math.min(parseInt(art.Da_Anni || 1900), parseInt(art.A_Anni || 1900));
+            const maxAnno = Math.max(parseInt(art.Da_Anni || 2100), parseInt(art.A_Anni || 2100));
+            const natiString = (art.Da_Anni || art.A_Anni) ? `Nati dal ${minAnno} al ${maxAnno}` : "Aperto a tutti";
+
+            html += `
+            <div class="col-12">
+                <div class="card product-row-card shadow-sm" style="${!lp.isValid ? 'opacity:0.6' : ''}">
+                    <div class="row align-items-center g-2">
+                        <div class="col-7 ps-2">
+                            <!-- 1. Visualizziamo Titolo_Articolo -->
+                            <h6 class="fw-bold mb-0" style="font-size:1rem; color:#1a2b3c;">${art.Titolo_Articolo || art.Nome_Articolo}</h6>
+                            <!-- 2. Aggiungiamo info Nati dal/al -->
+                            <div class="nati-info"><i class="far fa-calendar-alt me-1"></i> ${natiString}</div>
+                        </div>
+                        <div class="col-3 text-end">
+                            <div class="fw-bold text-danger" style="font-size:1.2rem; font-family: 'Roboto Mono', monospace;">${pDisp}</div>
+                            ${lp.isDynamic && lp.isValid ? `<small class="text-success fw-bold d-block" style="font-size:8px; line-height:1;">${lp.label}</small>` : ''}
+                        </div>
+                        <div class="col-2 text-end pe-2">
+                            <button class="btn btn-danger btn-sm rounded-pill fw-bold" 
+                                    style="font-size:10px; padding: 8px 20px !important;" 
+                                    onclick="window.startConfigurator('${art.ID_Articolo}')" 
+                                    ${!lp.isValid ? 'disabled' : ''}>
+                                ${lp.isValid ? 'ACQUISTA' : 'CHIUSO'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        });
+    }
+
+    container.innerHTML = html + '</div>';
+
+    // 4. FOCUS IN ALTO
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+/**
+ * 3. FIX: AGGANCIO GLOBALE FUNZIONI UI
+ */
+window.toggleDetrazioneUI = function (show) {
+    window.isDetrazioneActive = show;
+    window.renderCartUI(); // Ridisegna per mostrare/nascondere i campi
+};
+
+window.autoFillFiscalData = function (id) {
+    const membri = Array.isArray(window.shopCatalog.famiglia) ? window.shopCatalog.famiglia : (window.shopCatalog.famiglia.data || []);
+    const g = membri.find(m => m.IDContatto.toString() === id.toString());
+    if (g) {
+        window.selectedGenitoreId = id;
+        window.fiscalCF = g.Codice_Fiscale || "";
+        window.fiscalEmail = g.Email || "";
+        window.renderCartUI();
+    }
+};
+
+window.applyCoupon = function () {
+    const code = document.getElementById('cart_coupon_input')?.value.trim().toUpperCase();
+    if (!code) { window.appliedCouponCode = ""; window.couponFeedbackHTML = ""; window.recalculateCart(); return; }
+    const match = (window.shopCatalog.sconti || []).find(s => (s.Codice_Coupon || "").toUpperCase() === code && (s.Attivo === true || s.Attivo === "TRUE"));
+    if (match) {
+        window.appliedCouponCode = code;
+        window.couponFeedbackHTML = `<div class="text-success small fw-bold mt-1">Coupon applicato!</div>`;
+    } else {
+        window.appliedCouponCode = "";
+        window.couponFeedbackHTML = `<div class="text-danger small fw-bold mt-1">Codice non valido.</div>`;
+    }
+    window.recalculateCart();
+};
+
+
+window.removeAndRefresh = async function (index) {
+    const item = window.cart[index];
+    if (!item || !confirm("Rimuovere l'articolo?")) return;
+    try {
+        await callGAS("removeFromCartPersist", { idContatto: item.idContatto, idArticolo: item.idArticolo, email: window.globalData.userEmail });
+        window.cart.splice(index, 1);
+        window.recalculateCart();
+    } catch (e) { alert(e.message); }
+};
+
+
+/**
+ * 1. MOTORE DI IDONEITÀ
+ */
+window.checkEligibility = function (art, atleta) {
+    if (!art || !atleta) return false;
     if (art.Pubblicato !== true && art.Pubblicato !== "TRUE") return false;
 
-    // 2. FILTRO ANNO DI NASCITA (Il "Setaccio" per età)
     const dnRaw = (atleta.Data_Nascita || "").toString();
-    const match = dnRaw.match(/\d{4}/); // Estrae l'anno (es: 2014)
+    const match = dnRaw.match(/\d{4}/);
     const annoAtleta = match ? parseInt(match[0]) : 0;
-    
+
     if (art.Da_Anni || art.A_Anni) {
         const min = Math.min(parseInt(art.Da_Anni || 1900), parseInt(art.A_Anni || 1900));
         const max = Math.max(parseInt(art.Da_Anni || 2100), parseInt(art.A_Anni || 2100));
-        
-        if (annoAtleta > 0) {
-            if (annoAtleta < min || annoAtleta > max) return false;
-        }
+        if (annoAtleta > 0 && (annoAtleta < min || annoAtleta > max)) return false;
     }
 
-    // 3. FILTRO SESSO (M, F o Entrambi)
-    const sessoRichiesto = (art.Sesso || "").toString().trim().toUpperCase();
-    const sessoAtleta = (atleta.Sesso || "").toString().trim().toUpperCase();
-    if (sessoRichiesto !== "" && sessoAtleta !== "" && sessoAtleta !== sessoRichiesto) {
-        return false;
-    }
+    const sessoReq = (art.Sesso || "").toString().trim().toUpperCase();
+    const sessoAtl = (atleta.Sesso || "").toString().trim().toUpperCase();
+    if (sessoReq !== "" && sessoAtl !== "" && sessoAtl !== sessoReq) return false;
 
-    // 4. LOGICA SPECIFICA PER TESSERAMENTO RUGBY
     if (art.Tipo_Articolo === 'TESSERAMENTO') {
-        // A. Deve avere il ruolo "Atleta" nel profilo
         const ruolo = (atleta.Ruolo || "").toLowerCase();
         if (!ruolo.includes("atleta")) return false;
-
-        // B. Verifica Nuovo vs Rinnovo
-        // Il campo Tipo_Tecnico arriva dal JOIN fatto nel ponte GAS
         const profiloTecnico = (atleta.Tipo_Tecnico || "NUOVO").toUpperCase();
         const tipoArticolo = (art.Tipo_Tesseramento || "NUOVO").toUpperCase();
-        
         if (profiloTecnico !== tipoArticolo) return false;
     }
-
-    return true; // Se passa tutti i filtri, l'atleta può vedere il prodotto
+    return true;
 };
 
+
 /**
- * RENDER DELLE CATEGORIE
+ * 3. RENDER HOME (CATEGORIE)
  */
-window.renderShopHome = function() {
-    // 1. Nascondiamo il breadcrumb nella home dello shop
+window.renderShopHome = function () {
     const breadcrumb = document.getElementById('shop-breadcrumb');
     if (breadcrumb) breadcrumb.classList.add('d-none');
 
     const container = document.getElementById('shop-content-area');
-    if (!container) return;
-    
-    // 2. Definizione delle sezioni macro
+    if (!container || !window.shopCatalog) return;
+
+    const membri = Array.isArray(window.shopCatalog.famiglia)
+        ? window.shopCatalog.famiglia
+        : (window.shopCatalog.famiglia?.data || []);
+
     const sezioni = [
-      { id: 'TESSERAMENTO', label: 'Stagione Rugby' },
-      { id: 'CAMP', label: 'Camp Estivi e Clinic' },
-      { id: 'SERVIZIO', label: 'Servizi Aggiuntivi' },
-      { id: 'ATTIVITA', label: 'Corsi ed altre Attività Sportive' }
+        { id: 'TESSERAMENTO', label: 'Stagione Rugby' },
+        { id: 'CAMP', label: 'Camp Estivi e Clinic' },
+        { id: 'SERVIZIO', label: 'Servizi Aggiuntivi' },
+        { id: 'ATTIVITA', label: 'Corsi ed altre Attività Sportive' }
     ];
 
     let html = '<div class="animate__animated animate__fadeIn">';
 
     sezioni.forEach(s => {
-      // Filtriamo le categorie che appartengono a questa sezione e che hanno 
-      // almeno un articolo per cui almeno un membro della famiglia è idoneo
-      const catFiltrate = window.shopCatalog.categorie.filter(c => {
-        const isCorrectType = (c.Tipo_Articolo === s.id);
-        const hasEligibleArticles = window.shopCatalog.articoli.some(a => 
-            a.ID_Categoria === c.ID_Categoria && 
-            window.shopCatalog.famiglia.some(m => window.checkEligibility(a, m))
+        const catFiltrate = (window.shopCatalog.categorie || []).filter(c =>
+            c.Tipo_Articolo === s.id &&
+            (window.shopCatalog.articoli || []).some(a =>
+                a.ID_Categoria === c.ID_Categoria &&
+                membri.some(m => window.checkEligibility(a, m))
+            )
         );
-        return isCorrectType && hasEligibleArticles;
-      });
 
-      if (catFiltrate.length > 0) {
-        // Titolo della sezione (es: STAGIONE RUGBY)
-        html += `<div class="rm-section-title mt-4 mb-3">${s.label}</div>`;
-        html += `<div class="d-flex flex-wrap gap-4 px-2">`;
+        if (catFiltrate.length > 0) {
+            // Titolo sezione
+            html += `<div class="rm-section-title mt-4 mb-2">${s.label}</div>`;
 
-        catFiltrate.forEach(cat => {
-          // --- LOGICA VERSIONE 3: MINIATURA DIRETTA ---
-          // Trasformiamo l'URL/ID di Drive in un link immagine visualizzabile
-          const thumbUrl = getThumbnailUrl(cat.Immagine_URL);
+            // --- NUOVO CONTENITORE COMPATTO ---
+            html += `<div class="shop-category-container">`;
 
-          html += `
-            <div class="category-tile" onclick="window.openShopCategory('${cat.ID_Categoria}')" style="cursor:pointer; width:110px; text-align:center;">
-              <div class="tile-img-box shadow-sm mb-2" style="width:110px; height:110px; border-radius:15px; background:#fff; border:1px solid #ddd; overflow:hidden; display:flex; align-items:center; justify-content:center;">
-                 <img src="${thumbUrl}" 
-                      style="width:100%; height:100%; object-fit:cover;" 
-                      onerror="this.src='https://placehold.co/150x150?text=Rugby'"
-                      alt="${cat.Nome_Categoria}">
-              </div>
-              <div class="tile-name fw-bold" style="font-size:10px; text-transform:uppercase; color:var(--brand-dark);">${cat.Nome_Categoria}</div>
-            </div>`;
-        });
-        html += `</div>`;
-      }
+            catFiltrate.forEach(cat => {
+                const thumb = getThumbnailUrl(cat.Immagine_URL);
+                html += `
+                <div class="category-tile text-center" onclick="window.openShopCategory('${cat.ID_Categoria}')">
+                    <div class="tile-img-box shadow-sm">
+                        <img src="${thumb}" style="width:100%; height:100%; object-fit:cover;" onerror="this.src='https://placehold.co/90x90?text=Rugby'">
+                    </div>
+                    <div class="tile-name fw-bold text-uppercase">${cat.Nome_Categoria}</div>
+                </div>`;
+            });
+            html += `</div>`; // Chiude shop-category-container
+        }
     });
 
     container.innerHTML = html + '</div>';
-    console.log("✅ Home Shop renderizzata con successo.");
 };
 
 /**
- * FUNZIONI PLACEHOLDER (Per evitare crash al primo avvio)
+ * 5. CONFIGURATORE ACQUISTO
  */
-window.closeShop = function() {
-    console.log("🏠 Chiusura Shop e ritorno alla Home");
-    
-    const shopView = document.getElementById('shop-view');
-    const dashboardView = document.getElementById('dashboard-view');
+window.startConfigurator = function (idArt) {
+    const art = window.shopCatalog.articoli.find(a => a.ID_Articolo === idArt);
+    if (!art) return;
+    window.currentArtForConf = art;
 
-    if (shopView) {
-        shopView.classList.add('d-none');
-        shopView.style.display = 'none';
+    // 1. Visualizzazione Titolo Leggibile
+    const titleEl = document.getElementById('conf-titolo-articolo');
+    if (titleEl) titleEl.innerText = (art.Titolo_Articolo || art.Nome_Articolo).toUpperCase();
+
+    const priceEl = document.getElementById('conf-display-prezzo');
+    if (priceEl) priceEl.innerText = formatEuro(window.calculateLivePrice(art).price);
+
+    const containerMembri = document.getElementById('conf-membri-list');
+    if (containerMembri) {
+        const membri = Array.isArray(window.shopCatalog.famiglia)
+            ? window.shopCatalog.famiglia
+            : (window.shopCatalog.famiglia?.data || []);
+
+        containerMembri.innerHTML = membri
+            .filter(m => window.checkEligibility(art, m))
+            .map(m => `
+        <div class="member-card-wrapper">
+            <!-- Layout Flex pulito senza margini negativi -->
+            <div class="d-flex align-items-center m-0">
+                <input class="form-check-input conf-membro-check" 
+                       type="checkbox" 
+                       value="${m.IDContatto}" 
+                       id="m_${m.IDContatto}"
+                       onchange="window.handleMemberToggle(this, '${m.IDContatto}')"
+                       style="margin-left:0;">
+                <label class="fw-bold text-dark mb-0" for="m_${m.IDContatto}" style="font-size: 0.85rem; cursor:pointer;">
+                    ${m.Nome} ${m.Cognome}
+                </label>
+            </div>
+            <!-- Contenitore dati anagrafici/tecnici -->
+            <div id="personal-data-container-${m.IDContatto}" class="mt-2"></div>
+        </div>`).join('');
     }
 
-    if (dashboardView) {
-        dashboardView.classList.remove('d-none');
-        dashboardView.style.display = 'block';
+    const modalEl = document.getElementById('modalConfiguratore');
+    if (modalEl && window.bootstrap) {
+        window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
     }
-
-    // Forza lo scroll in alto per vedere le bolle
-    window.scrollTo(0, 0);
 };
 
 /**
- * Calcola i prezzi finali e applica le regole di sconto (fratelli, coupon, ecc.)
+ * GESTISCE IL RENDERING DEI CAMPI (Con Lista Squadre Dinamica)
  */
-window.recalculateCart = function() {
+window.handleMemberToggle = function (checkbox, idContatto) {
+    const containerId = `personal-data-container-${idContatto}`;
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (checkbox.checked) {
+        try {
+            const art = window.currentArtForConf;
+
+            // 1. Funzione di recupero tollerante per i campi dell'articolo
+            const getArtVal = (target) => {
+                const cleanTarget = target.toLowerCase().replace(/_/g, "");
+                const foundKey = Object.keys(art).find(k => k.toLowerCase().replace(/_/g, "") === cleanTarget);
+                const val = (foundKey && art[foundKey]) ? art[foundKey].toString().trim() : null;
+                return (val === "" || val === "null" || val === "undefined") ? null : val;
+            };
+
+            const targetGruppo = getArtVal("UI_Gruppo");
+            const targetProfilo = getArtVal("UI_Profilo");
+
+            // --- LOGICA RICHIESTA: Se mancano i puntamenti UI, non mostriamo il form ---
+            if (!targetGruppo || !targetProfilo) {
+                console.log(`ℹ️ Articolo "${art.Nome_Articolo}" non richiede form anagrafico.`);
+                container.innerHTML = ""; // Contenitore vuoto
+            } else {
+                // --- PROCEDIAMO CON IL RENDERING DINAMICO ---
+                const targetProfiloUpper = targetProfilo.toUpperCase();
+                const configCampi = window.globalData.config[targetProfiloUpper] || [];
+
+                if (configCampi.length === 0) {
+                    console.warn(`⚠️ Configurazione [${targetProfiloUpper}] non trovata.`);
+                    container.innerHTML = "";
+                } else {
+                    const idCPulito = idContatto.toString().toLowerCase().trim();
+                    const membri = Array.isArray(window.shopCatalog.famiglia) ? window.shopCatalog.famiglia : (window.shopCatalog.famiglia?.data || []);
+                    const mBase = membri.find(f => f.IDContatto.toString() === idContatto.toString());
+
+                    // Merge Dati (Anagrafica + Tecnici + Kit + Privacy)
+                    const fullMemberData = {
+                        ...mBase,
+                        ...(window.globalData.atleti[idCPulito] || {}),
+                        ...(window.globalData.taglieKit[idCPulito] || {}),
+                        ...(window.globalData.privacyData[idCPulito] || {})
+                    };
+
+                    // Gestione Override Squadre (Articolo:Lista_Squadre)
+                    const overrides = {};
+                    configCampi.forEach(conf => {
+                        if (typeof conf.opzioni === "string" && conf.opzioni.startsWith("Articolo:")) {
+                            const colonnaArt = conf.opzioni.split(":")[1];
+                            const valoreGrezzo = art[colonnaArt] || art[colonnaArt.replace(/_/g, " ")] || "";
+                            if (valoreGrezzo) {
+                                overrides[conf.id] = valoreGrezzo.split(',').map(s => s.trim()).filter(Boolean);
+                            }
+                        }
+                    });
+
+                    console.log(`📤 Rendering form [${targetProfiloUpper}] per ${mBase.Nome}`);
+                    window.renderAnagraficaForm(fullMemberData, configCampi, true, containerId, overrides);
+                }
+            }
+
+        } catch (e) {
+            console.error("❌ Errore nel caricamento del form membro:", e);
+        }
+    } else {
+        container.innerHTML = "";
+    }
+
+    // Gestione stato tasto "AGGIUNGI"
+    const selezionati = document.querySelectorAll('.conf-membro-check:checked').length;
+    const btnAdd = document.getElementById('btn-add-to-cart');
+    if (btnAdd) btnAdd.disabled = (selezionati === 0);
+};
+
+/**
+ * 6. LOGICA PREZZI E CARRELLO
+ */
+window.calculateLivePrice = function (art) {
+    const basePrice = parseFloat(art ? (art.Prezzo_Default || 0) : 0);
+    const listinoNome = (art && art.Nome_Quota) ? art.Nome_Quota.toString().trim() : "";
+    if (listinoNome === "") return { price: basePrice, label: "Quota Base", isValid: basePrice > 0 };
+
+    const oggi = new Date();
+    const oggiInt = (oggi.getFullYear() * 10000) + ((oggi.getMonth() + 1) * 100) + oggi.getDate();
+    const tariffe = (window.shopCatalog.tariffe || []).filter(t => t.Nome_Tariffa?.toUpperCase() === listinoNome.toUpperCase());
+    const valid = tariffe.find(t => {
+        const d = new Date(t.Valido_Dal); const a = new Date(t.Valido_Al);
+        const di = (d.getFullYear() * 10000) + ((d.getMonth() + 1) * 100) + d.getDate();
+        const ai = (a.getFullYear() * 10000) + ((a.getMonth() + 1) * 100) + a.getDate();
+        return oggiInt >= di && oggiInt <= ai;
+    });
+    return valid ? { price: parseFloat(valid.Prezzo), label: "Tariffa Attiva", isValid: true } : { price: 0, label: "CHIUSO", isValid: false };
+};
+
+/**
+ * 2. IL MOTORE DEGLI SCONTI (RECALCULATE CART)
+ * Copiato e adattato dall'originale per gestire Fratelli e Soglie
+ */
+window.recalculateCart = function () {
     if (!window.cart || window.cart.length === 0) {
         window.appliedCouponCode = "";
         window.renderCartUI(); // Pulisce la UI
@@ -256,7 +630,7 @@ window.recalculateCart = function() {
 
         // Filtro categorie merceologiche dello sconto
         const fCat = (regola.Filtro_Cat_Merciol || "").toString().split(',').map(s => s.trim());
-        
+
         const righePapabili = window.cart.filter(item => {
             if (fCat.length > 0 && fCat[0] !== "" && !fCat.includes(item.idCategoria)) return false;
             // Altri filtri (es. Ruolo)
@@ -270,7 +644,7 @@ window.recalculateCart = function() {
                 const tipo = (regola.Tipo_Valore || "").toString().toUpperCase();
                 const valoreSconto = parseFloat(regola.Valore) || 0;
                 let calcolo = (tipo.includes("PERC") || tipo === "%") ? (rigo.finalPrice * (valoreSconto / 100)) : valoreSconto;
-                
+
                 rigo.finalPrice = Math.max(0, rigo.finalPrice - calcolo);
                 rigo.scontiDettaglio.push({ nome: regola.Nome_Sconto, valore: calcolo });
             });
@@ -281,650 +655,168 @@ window.recalculateCart = function() {
 };
 
 /**
- * RENDER ARTICOLI CATEGORIA
+ * --- AGGIUNTA AL CARRELLO E AGGIORNAMENTO ANAGRAFICA ---
+ * Raccoglie i dati dal modale, aggiorna lo Spreadsheet e salva l'articolo.
  */
-window.openShopCategory = function(idCat) {
-    const cat = window.shopCatalog.categorie.find(c => c.ID_Categoria === idCat);
-    if (!cat) return;
-
-    // Gestione Breadcrumb
-    const breadcrumb = document.getElementById('shop-breadcrumb');
-    const breadcrumbCurrent = document.getElementById('breadcrumb-current');
-    if (breadcrumb) breadcrumb.classList.remove('d-none');
-    if (breadcrumbCurrent) breadcrumbCurrent.innerText = cat.Nome_Categoria;
-    
-    // Filtro articoli idonei per almeno un membro della famiglia
-    const articoliIdonei = window.shopCatalog.articoli.filter(a => 
-        a.ID_Categoria === idCat && 
-        window.shopCatalog.famiglia.some(m => window.checkEligibility(a, m))
-    );
-
-    const container = document.getElementById('shop-content-area');
-    if (articoliIdonei.length === 0) {
-        container.innerHTML = `<div class="alert alert-light text-center p-5 border shadow-sm" style="border-radius:15px;">
-            <i class="fas fa-info-circle fa-2x mb-3 text-muted"></i><br>
-            Nessun articolo disponibile per questa categoria in base all'età o al ruolo dei componenti della tua famiglia.
-        </div>`;
-        return;
-    }
-
-    let html = '<div class="row g-3 animate__animated animate__fadeIn">';
-    articoliIdonei.forEach(art => {
-        const lp = window.calculateLivePrice(art);
-        
-        // --- LOGICA DI BLOCCO ---
-        const prezzoDisplay = lp.isValid ? formatEuro(lp.price) : `<span class="text-muted small" style="font-size:0.8rem">NON DISPONIBILE</span>`;
-        const btnDisabled = lp.isValid ? '' : 'disabled';
-        const btnClass = lp.isValid ? 'btn-danger' : 'btn-outline-secondary';
-        const btnText = lp.isValid ? 'ACQUISTA' : 'CHIUSO';
-
-        html += `
-            <div class="col-12">
-                <div class="card product-row-card shadow-sm border-0 p-3 mb-2" style="border-radius:15px; ${!lp.isValid ? 'opacity: 0.7;' : ''}">
-                    <div class="row align-items-center">
-                        <div class="col-md-7">
-                            <h6 class="fw-bold mb-1 ${!lp.isValid ? 'text-muted' : 'text-dark'}">${art.Nome_Articolo}</h6>
-                            <div class="badge bg-light text-danger border small" style="font-size:10px;">
-                                ${window.renderTechnicalDetails(art)}
-                            </div>
-                        </div>
-                        <div class="col-md-3 text-end">
-                            <div class="price-tag-shop" style="font-size:1.4rem; color:${lp.isValid ? 'var(--brand)' : '#ccc'}; font-weight:800;">
-                                ${prezzoDisplay}
-                            </div>
-                            <small class="${lp.isValid ? 'text-success' : 'text-muted'} fw-bold" style="font-size:9px; text-transform:uppercase;">
-                                ${lp.label}
-                            </small>
-                        </div>
-                        <div class="col-md-2 text-end">
-                            <button class="btn ${btnClass} fw-bold w-100 py-2 shadow-sm rounded-pill" 
-                                    onclick="window.startConfigurator('${art.ID_Articolo}')"
-                                    ${btnDisabled}>
-                                ${btnText}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>`;
-    });
-    container.innerHTML = html + '</div>';
-};
-
-/**
- * CALCOLO PREZZO LIVE (Gestisce i listini a tempo e promozioni)
- */
-window.calculateLivePrice = function(art) {
-    const basePrice = parseFloat(art ? (art.Prezzo_Default || 0) : 0);
-    const listinoNome = (art && art.Nome_Quota) ? art.Nome_Quota.toString().trim() : "";
-
-    // Se l'articolo NON richiede un listino dinamico, usiamo il prezzo base
-    if (listinoNome === "") {
-        const hasBasePrice = !isNaN(basePrice) && basePrice > 0;
-        return { 
-            price: basePrice, 
-            label: "Quota Base", 
-            isDynamic: false, 
-            isValid: hasBasePrice // Valido solo se il prezzo base è definito
-        };
-    }
-
-    // Se richiede un listino, cerchiamo la tariffa valida per OGGI
-    const oggi = new Date();
-    const oggiInt = (oggi.getFullYear() * 10000) + ((oggi.getMonth() + 1) * 100) + oggi.getDate();
-
-    const tariffe = (window.shopCatalog.tariffe || []).filter(t => {
-        const nTar = (t.Nome_Tariffa || "").toString().toUpperCase().trim();
-        return nTar === listinoNome.toUpperCase();
-    });
-
-    const tariffaValida = tariffe.find(t => {
-        if (!t.Valido_Dal || !t.Valido_Al) return false;
-        const dDal = new Date(t.Valido_Dal);
-        const dAl = new Date(t.Valido_Al);
-        if (isNaN(dDal.getTime()) || isNaN(dAl.getTime())) return false;
-        
-        const dalInt = (dDal.getFullYear() * 10000) + ((dDal.getMonth() + 1) * 100) + dDal.getDate();
-        const alInt = (dAl.getFullYear() * 10000) + ((dAl.getMonth() + 1) * 100) + dAl.getDate();
-        return oggiInt >= dalInt && oggiInt <= alInt;
-    });
-
-    if (tariffaValida) {
-        return { 
-            price: parseFloat(tariffaValida.Prezzo || 0), 
-            label: "Tariffa Attiva", 
-            isDynamic: true,
-            isValid: true 
-        };
-    }
-
-    // --- CASO ERRORE: Listino richiesto ma nessuna tariffa valida trovata per oggi ---
-    return { 
-        price: 0, 
-        label: "ISCRIZIONI CHIUSE", 
-        isDynamic: true,
-        isValid: false // Segnaliamo che la selezione deve essere negata
-    };
-};
-
-window.calculateLivePriceOLD = function(art) {
-    const basePrice = parseFloat(art ? (art.Prezzo_Default || 0) : 0);
-    const listinoNome = (art && art.Nome_Quota) ? art.Nome_Quota.toString().trim() : "";
-
-    if (listinoNome === "") {
-        return { price: basePrice, label: "Quota Base", isDynamic: false };
-    }
-
-    // Confronto date numerico per evitare bug di fuso orario
-    const oggi = new Date();
-    const oggiInt = (oggi.getFullYear() * 10000) + ((oggi.getMonth() + 1) * 100) + oggi.getDate();
-
-    const tariffe = (window.shopCatalog.tariffe || []).filter(t => {
-        const nTar = (t.Nome_Tariffa || "").toString().toUpperCase().trim();
-        return nTar === listinoNome.toUpperCase();
-    });
-
-    const tariffaValida = tariffe.find(t => {
-        if (!t.Valido_Dal || !t.Valido_Al) return false;
-        const dDal = new Date(t.Valido_Dal);
-        const dAl = new Date(t.Valido_Al);
-        if (isNaN(dDal.getTime()) || isNaN(dAl.getTime())) return false;
-        
-        const dalInt = (dDal.getFullYear() * 10000) + ((dDal.getMonth() + 1) * 100) + dDal.getDate();
-        const alInt = (dAl.getFullYear() * 10000) + ((dAl.getMonth() + 1) * 100) + dAl.getDate();
-        return oggiInt >= dalInt && oggiInt <= alInt;
-    });
-
-    if (tariffaValida) {
-        return { 
-            price: parseFloat(tariffaValida.Prezzo || 0), 
-            label: "Promozione Attiva", 
-            isDynamic: true 
-        };
-    }
-
-    return { price: basePrice, label: "Quota Base", isDynamic: false };
-};
-
-/**
- * FORMATTA DETTAGLI TECNICI SOTTO IL NOME ARTICOLO
- */
-window.renderTechnicalDetails = function(art) {
-    let d = [];
-    if (art.Stagione) d.push(art.Stagione);
-    if (art.Area) d.push(art.Area);
-    if (art.Da_Anni) {
-        const min = Math.min(art.Da_Anni, art.A_Anni);
-        const max = Math.max(art.Da_Anni, art.A_Anni);
-        d.push("Nati: " + min + "/" + max);
-    }
-    return d.join(' • ');
-};
-
-/**
- * APRE IL MODALE DI CONFIGURAZIONE ACQUISTO
- */
-window.startConfigurator = function(idArt) {
-    // Cerchiamo l'articolo nel catalogo caricato
-    const art = window.shopCatalog.articoli.find(a => a.ID_Articolo === idArt);
-    if (!art) return;
-    
-    window.currentArtForConf = art;
-
-    // Reset UI Modale
-    document.getElementById('conf-titolo-articolo').innerText = art.Nome_Articolo;
-    document.getElementById('btn-add-to-cart').disabled = true;
-    
-    const lp = window.calculateLivePrice(art);
-    document.getElementById('conf-display-prezzo').innerText = formatEuro(lp.price);
-
-    const containerMembri = document.getElementById('conf-membri-list');
-    
-    // Filtriamo la famiglia per chi è idoneo a questo articolo
-    // Nota: window.shopCatalog.famiglia è l'array di oggetti tornato da GAS
-    containerMembri.innerHTML = window.shopCatalog.famiglia
-        .filter(m => window.checkEligibility(art, m))
-        .map(m => `
-            <div class="p-3 border rounded-4 mb-2 bg-white shadow-sm animate__animated animate__fadeIn">
-                <div class="form-check d-flex align-items-center">
-                    <input class="form-check-input conf-membro-check me-3" 
-                           type="checkbox" 
-                           value="${m.IDContatto}" 
-                           id="m_${m.IDContatto}" 
-                           onchange="window.handleMemberToggle(this, '${m.IDContatto}')"
-                           style="width: 22px; height: 22px;">
-                    <label class="form-check-label fw-bold text-dark flex-grow-1" for="m_${m.IDContatto}">
-                        ${m.Cognome} ${m.Nome}
-                        <div class="text-muted small fw-normal">${m.Ruolo}</div>
-                    </label>
-                </div>
-                <!-- Area per Squadra e Taglie (si apre al check) -->
-                <div id="personal-data-container-${m.IDContatto}" class="mt-2"></div>
-            </div>
-        `).join('');
-
-    // Apertura Modale via Bootstrap (Safe mode per IDX)
-    if (window.bootstrap) {
-        const modalEl = document.getElementById('modalConfiguratore');
-        window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
-    }
-};
-
-/**
- * Gestisce l'attivazione di un membro nel configuratore
- */
-window.handleMemberToggle = function(checkbox, idContatto) {
-    const container = document.getElementById('personal-data-container-' + idContatto);
-    
-    if (checkbox.checked) {
-        const membro = window.shopCatalog.famiglia.find(f => f.IDContatto.toString() === idContatto.toString());
-        container.innerHTML = window.renderTaglieBlock(membro, window.currentArtForConf);
-    } else {
-        container.innerHTML = "";
-    }
-    
-    // Abilita il tasto "Aggiungi al carrello" solo se c'è almeno un selezionato
-    const selezionati = document.querySelectorAll('.conf-membro-check:checked').length;
-    const btnAdd = document.getElementById('btn-add-to-cart');
-    if (btnAdd) btnAdd.disabled = (selezionati === 0);
-};
-
-/**
- * Disegna i selettori di Squadra e Taglie se richiesti dall'articolo
- */
-window.renderTaglieBlock = function(membro, art) {
-    const lists = window.shopCatalog.taglieLists || { tshirt: [], pant: [], calz: [] };
-    
-    // Funzione helper per gestire i flag dello Spreadsheet (possono essere booleani o stringhe "true")
-    const isTrue = v => (v === true || v === "true" || v === "TRUE" || v === "SÌ" || v === "SI");
-    
-    let html = '<div class="p-3 border border-danger border-opacity-25 rounded-4 bg-light animate__animated animate__fadeIn"><div class="row g-2">';
-    
-    // 1. Selettore Squadra (se definito nell'articolo)
-    if (art.Lista_Squadre && art.Lista_Squadre.trim() !== "") {
-        const squadre = art.Lista_Squadre.split(',').map(s => s.trim());
-        html += `
-            <div class="col-12 mb-2">
-                <label class="fw-bold small text-danger">SQUADRA / CATEGORIA</label>
-                <select class="form-select form-select-sm f-squadra" data-id="${membro.IDContatto}">
-                    <option value="">- Seleziona Squadra -</option>
-                    ${squadre.map(s => `<option value="${s}">${s}</option>`).join('')}
-                </select>
-            </div>`;
-    }
-
-    // 2. Selettori Taglie Kit
-    if (isTrue(art.Richiedi_Maglietta)) {
-        html += `
-            <div class="col-4">
-                <label class="small fw-bold">T-SHIRT</label>
-                <select class="form-select form-select-sm f-taglia-maglia" data-id="${membro.IDContatto}">
-                    <option value="">-</option>
-                    ${lists.tshirt.map(t => `<option value="${t}">${t}</option>`).join('')}
-                </select>
-            </div>`;
-    }
-
-    if (isTrue(art.Richiedi_Pantaloni)) {
-        html += `
-            <div class="col-4">
-                <label class="small fw-bold">PANT.</label>
-                <select class="form-select form-select-sm f-taglia-panta" data-id="${membro.IDContatto}">
-                    <option value="">-</option>
-                    ${lists.pant.map(t => `<option value="${t}">${t}</option>`).join('')}
-                </select>
-            </div>`;
-    }
-
-    if (isTrue(art.Richiedi_Calze)) {
-        html += `
-            <div class="col-4">
-                <label class="small fw-bold">CALZE</label>
-                <select class="form-select form-select-sm f-taglia-calze" data-id="${membro.IDContatto}">
-                    <option value="">-</option>
-                    ${lists.calz.map(t => `<option value="${t}">${t}</option>`).join('')}
-                </select>
-            </div>`;
-    }
-
-    return html + '</div></div>';
-};
-
-/**
- * Raccoglie le selezioni dal configuratore e salva gli articoli nel carrello (Spreadsheet)
- */
-window.addToCart = async function() {
+window.addToCart = async function () {
     const art = window.currentArtForConf;
+    if (!art) return;
+
     const checks = document.querySelectorAll('.conf-membro-check:checked');
-    const itemsToAdd = [];
-
-    // Protezione: se per qualche motivo window.cart è sparito, lo ricreiamo
-    if (!Array.isArray(window.cart)) window.cart = [];
-
-    // 1. RACCOLTA DATI E VALIDAZIONE
-    for (const cb of checks) {
-        const idC = cb.value;
-        const m = window.shopCatalog.famiglia.find(f => f.IDContatto.toString() === idC.toString());
-        const meta = {};
-        
-        // Validazione Squadra
-        const sEl = document.querySelector(`.f-squadra[data-id="${idC}"]`);
-        if (sEl && !sEl.value) return alert(`Scegli la squadra per ${m.Nome}`);
-        if (sEl) meta.squadra = sEl.value;
-        
-        // Validazione Taglie
-        const mEl = document.querySelector(`.f-taglia-maglia[data-id="${idC}"]`);
-        if (mEl && !mEl.value) return alert(`Scegli taglia T-shirt per ${m.Nome}`);
-        if (mEl) meta.tagliaMaglia = mEl.value;
-
-        const pEl = document.querySelector(`.f-taglia-panta[data-id="${idC}"]`);
-        if (pEl) meta.tagliaPanta = pEl.value;
-        
-        const cEl = document.querySelector(`.f-taglia-calze[data-id="${idC}"]`);
-        if (cEl) meta.tagliaCalze = cEl.value;
-
-        itemsToAdd.push({
-            email: window.globalData.userEmail,
-            idContatto: idC,
-            nomeMembro: `${m.Nome} ${m.Cognome}`,
-            ruoloMembro: m.Ruolo,
-            idArticolo: art.ID_Articolo,
-            idCategoria: art.ID_Categoria,
-            nomeArticolo: art.Nome_Articolo,
-            prezzoBase: window.calculateLivePrice(art).price,
-            metadati: meta,
-            addedAt: Date.now()
-        });
-    }
-
-    if (itemsToAdd.length === 0) return;
-
-    const loader = document.getElementById('loading-overlay');
-    if (loader) loader.style.display = 'flex';
-
-    try {
-        // 2. INVIO AL SERVER (GAS)
-        await Promise.all(itemsToAdd.map(item => callGAS("addToCartPersist", item)));
-
-        // 3. AGGIORNAMENTO LOCALE (Qui avveniva l'errore)
-        itemsToAdd.forEach(i => {
-            window.cart.push({
-                ...i,
-                finalPrice: i.prezzoBase,
-                scontiDettaglio: []
-            });
-        });
-
-        // 4. RICALCOLO E AGGIORNAMENTO UI
-        // Assicurati che queste funzioni siano definite (anche come placeholder)
-        if (typeof window.recalculateCart === "function") window.recalculateCart();
-        if (typeof window.renderCartUI === "function") window.renderCartUI();
-
-        const modalEl = document.getElementById('modalConfiguratore');
-        if (window.bootstrap) {
-            window.bootstrap.Modal.getOrCreateInstance(modalEl).hide();
-        }
-
-        alert("✅ Iscrizioni aggiunte correttamente!");
-
-    } catch (e) {
-        console.error("❌ Errore durante l'aggiunta:", e);
-        alert("Errore: " + e.message);
-    } finally {
-        if (loader) loader.style.display = 'none';
-    }
-};
-
-/**
- * RENDER CARRELLO INTEGRATO
- * Visualizza il riepilogo costi, coupon e dati per detrazione 730
- */
-window.renderCartUI = function() {
-    const container = document.getElementById('cart-integrated-container');
-    if (!container) return;
-
-    // 1. Gestione Carrello Vuoto
-    if (!window.cart || window.cart.length === 0) {
-        container.classList.add('d-none');
-        container.style.display = 'none';
-        window.updateCartUI(); 
-        return;
-    }
-
-    // 2. Mostra il contenitore
-    container.classList.remove('d-none');
-    container.style.display = 'block';
-
-    // 3. Calcolo Totale e Filtro Adulti per Detrazione
-    const totaleGenerale = window.cart.reduce((s, i) => s + (i.finalPrice || 0), 0);
-    
-    // Assicuriamoci di leggere correttamente l'array famiglia
-    const listaMembri = window.shopCatalog.famiglia.data || window.shopCatalog.famiglia || [];
-    const adulti = listaMembri.filter(m => {
-        const r = (m.Ruolo || "").toUpperCase();
-        return r.includes("GENITORE") || r.includes("SOCIO") || r.includes("CONSIGLIERE");
-    });
-
-    // 4. Generazione Righe Tabella
-    const htmlRows = window.cart.map((item, index) => {
-        const scontiHtml = (item.scontiDettaglio || []).map(s => `
-            <div class="mb-1">
-                <span class="discount-label">
-                    <i class="fas fa-tag me-1"></i>${s.nome}: -${formatEuro(s.valore)}
-                </span>
-            </div>`).join('');
-
-        let metaHtml = "";
-        if (item.metadati) {
-            if (item.metadati.squadra) metaHtml += `<span class="badge bg-light text-dark border me-1" style="font-size:9px;">${item.metadati.squadra}</span>`;
-            if (item.metadati.tagliaMaglia) metaHtml += `<small class="text-muted" style="font-size:10px;">Kit: ${item.metadati.tagliaMaglia}</small>`;
-        }
-
-        return `
-            <tr>
-                <td class="ps-4 py-3">
-                    <div class="fw-bold text-dark" style="font-size:14px;">${item.nomeArticolo}</div>
-                    <div class="small">Per: <span class="fw-bold text-danger">${item.nomeMembro}</span></div>
-                    <div class="mt-1">${metaHtml}</div>
-                </td>
-                <td class="text-center text-muted">${formatEuro(item.prezzoBase)}</td>
-                <td>${scontiHtml || '<small class="text-muted italic" style="font-size:10px;">Nessuno</small>'}</td>
-                <td class="text-end fw-bold text-dark pe-4" style="font-size:1.1rem;">${formatEuro(item.finalPrice)}</td>
-                <td class="text-center pe-3">
-                    <button class="btn btn-sm btn-outline-danger border-0" onclick="window.removeAndRefresh(${index})">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </td>
-            </tr>`;
-    }).join('');
-
-    // 5. Template Finale
-    container.innerHTML = `
-    <div class="cart-integrated-card shadow-sm mb-5 animate__animated animate__fadeIn" style="border-radius: 15px; overflow: hidden; border: 1px solid #eee;">
-      <div class="p-3 bg-dark text-white d-flex justify-content-between align-items-center">
-        <h6 class="mb-0 fw-bold"><i class="fas fa-shopping-cart me-2 text-danger"></i>RIEPILOGO ISCRIZIONE</h6>
-        <span class="badge bg-danger rounded-pill">${window.cart.length} Articoli</span>
-      </div>
-      
-      <div class="table-responsive bg-white">
-        <table class="table table-hover align-middle mb-0">
-          <thead class="bg-light">
-            <tr style="font-size: 10px; text-transform: uppercase; color: #888;">
-              <th class="ps-4 py-3">Articolo / Beneficiario</th>
-              <th class="text-center">Prezzo Base</th>
-              <th>Sconti</th>
-              <th class="text-end">Totale</th>
-              <th style="width: 50px;"></th>
-            </tr>
-          </thead>
-          <tbody>${htmlRows}</tbody>
-        </table>
-      </div>
-
-      <div class="p-3 bg-white border-top">
-          <div class="col-md-5">
-            <label class="fw-bold small text-muted mb-2 text-uppercase">Codice Coupon</label>
-            <div class="input-group input-group-sm">
-              <input type="text" id="cart_coupon_input" class="form-control" placeholder="Inserisci codice..." 
-                     value="${window.appliedCouponCode || ''}">
-              <button class="btn btn-dark fw-bold" type="button" onclick="window.applyCoupon()">APPLICA</button>
-            </div>
-            <!-- Visualizza il messaggio di feedback (Successo o Errore) salvato globalmente -->
-            <div id="coupon_feedback" class="mt-1">
-              ${window.couponFeedbackHTML || ''}
-            </div>
-          </div>
-
-          <!-- Sezione Detrazione -->
-          <div class="col-md-7 border-start">
-            <div class="form-check form-switch mb-2">
-                <input class="form-check-input" type="checkbox" id="f_detrazione_attiva" 
-                       onchange="window.toggleDetrazioneUI(this.checked)" 
-                       ${window.isDetrazioneActive ? 'checked' : ''}>
-                <label class="form-check-label fw-bold small text-dark" for="f_detrazione_attiva">Richiedo ricevuta per detrazione fiscale (730)</label>
-            </div>
-            <div id="detrazione-fields-ui" class="${window.isDetrazioneActive ? '' : 'd-none'}">
-                <div class="row g-2">
-                   <div class="col-md-12">
-                     <select id="f_genitore_detrazione" class="form-select form-select-sm" onchange="window.autoFillFiscalData(this.value)">
-                        <option value="">-- Intesta la ricevuta a... --</option>
-                        ${adulti.map(a => `<option value="${a.IDContatto}" ${window.selectedGenitoreId == a.IDContatto ? 'selected' : ''}>${a.Cognome} ${a.Nome}</option>`).join('')}
-                     </select>
-                   </div>
-                   <div class="col-md-6">
-                     <input type="text" id="f_detrazione_cf" class="form-control form-control-sm bg-light" placeholder="Codice Fiscale" readonly value="${window.fiscalCF || ''}">
-                   </div>
-                   <div class="col-md-6">
-                     <input type="text" id="f_detrazione_email" class="form-control form-control-sm bg-light" placeholder="Email" readonly value="${window.fiscalEmail || ''}">
-                   </div>
-                </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="p-3 bg-light border-top d-flex justify-content-between align-items-center">
-        <div class="ps-3">
-          <small class="text-muted text-uppercase fw-bold d-block" style="font-size:10px;">Importo Totale</small>
-          <div class="h3 fw-bold text-danger mb-0">${formatEuro(totaleGenerale)}</div>
-        </div>
-        <button class="btn btn-success fw-bold px-5 py-3 shadow-sm" style="border-radius:12px;" onclick="window.checkout()">
-          CONFERMA E PROCEDI AL PAGAMENTO <i class="fas fa-arrow-right ms-2"></i>
-        </button>
-      </div>
-    </div>`;
-
-    window.updateCartUI();
-};
-
-window.toggleDetrazioneUI = function(show) {
-    window.isDetrazioneActive = show;
-    const fields = document.getElementById('detrazione-fields-ui');
-    if (fields) {
-        if (show) fields.classList.remove('d-none');
-        else fields.classList.add('d-none');
-    }
-};
-
-window.autoFillFiscalData = function(idContatto) {
-    window.selectedGenitoreId = idContatto;
-    const listaMembri = window.shopCatalog.famiglia.data || window.shopCatalog.famiglia || [];
-    const genitore = listaMembri.find(f => f.IDContatto.toString() === idContatto.toString());
-    if (genitore) {
-        window.fiscalCF = genitore.Codice_Fiscale || "";
-        window.fiscalEmail = genitore.Email || "";
-        document.getElementById('f_detrazione_cf').value = window.fiscalCF;
-        document.getElementById('f_detrazione_email').value = window.fiscalEmail;
-    }
-};
-
-window.updateCartUI = function() {
-    const total = window.cart.reduce((s, i) => s + (i.finalPrice || 0), 0);
-    const countEl = document.getElementById('cart-count');
-    if (countEl) countEl.innerText = window.cart.length;
-};
-
-/**
- * Rimuove un articolo dal carrello (sia locale che Spreadsheet)
- */
-window.removeAndRefresh = async function(index) {
-    const item = window.cart[index];
-    if (!item) return;
-
-    if (!confirm(`Vuoi davvero rimuovere "${item.nomeArticolo}" per ${item.nomeMembro}?`)) return;
+    if (checks.length === 0) return alert("Seleziona almeno un componente della famiglia.");
 
     const loader = document.getElementById('loading-overlay');
     if (loader) {
-        loader.style.display = 'flex';
-        const txt = loader.querySelector('h5');
-        if (txt) txt.innerText = "Aggiornamento carrello...";
+        loader.style.setProperty('display', 'flex', 'important');
+        loader.querySelector('h5').innerText = "Salvataggio anagrafica e aggiornamento carrello...";
     }
 
     try {
-        // 1. Chiamata al ponte GAS per rimuovere la riga dallo Spreadsheet
-        // Assicurati che nel tuo .gs esista l'azione "removeFromCartPersist"
-        await callGAS("removeFromCartPersist", { 
-            idContatto: item.idContatto, 
-            idArticolo: item.idArticolo,
-            email: window.globalData.userEmail
-        });
+        const itemsToAdd = [];
+        const membri = Array.isArray(window.shopCatalog.famiglia)
+            ? window.shopCatalog.famiglia
+            : (window.shopCatalog.famiglia?.data || []);
 
-        // 2. Rimozione dalla memoria locale
-        window.cart.splice(index, 1);
+        for (const cb of checks) {
+            const idC = cb.value;
+            const containerMembro = document.getElementById(`personal-data-container-${idC}`);
+            if (!containerMembro) continue;
 
-        // 3. Ricalcolo Sconti (fondamentale per le soglie)
+            const memberRef = membri.find(f => f.IDContatto.toString() === idC.toString());
+
+            // --- RACCOLTA DATI DAL FORM DEL MODALE ---
+            const fields = containerMembro.querySelectorAll('.val-field');
+            const updatePayload = {
+                idContatto: idC,
+                ID_Famiglia: window.globalData.idFamiglia
+            };
+            const metaData = {};
+
+            let isValid = true;
+            fields.forEach(f => {
+                const fieldId = f.getAttribute('data-id');
+                if (!fieldId) return;
+
+                // Gestione specifica per checkbox/switch
+                const val = (f.type === 'checkbox') ? f.checked : f.value.trim();
+
+                // Validazione obbligatorietà
+                if (f.hasAttribute('required') && (val === "" || val === false)) {
+                    f.classList.add('is-invalid');
+                    isValid = false;
+                } else {
+                    f.classList.remove('is-invalid');
+                }
+
+                updatePayload[fieldId] = val;
+                metaData[fieldId] = val;
+            });
+
+            if (!isValid) {
+                if (loader) loader.style.display = 'none';
+                alert(`⚠️ Compila tutti i campi obbligatori per ${memberRef ? memberRef.Nome : 'il socio'}.`);
+                return;
+            }
+
+            // A. SALVATAGGIO IN ANAGRAFICA (GAS) - Chiamata bloccante
+            console.log(`📤 Salvataggio dati tecnici per ${idC}...`, updatePayload);
+            const saveRes = await callGAS("salvaDatiMembro", { payload: updatePayload });
+            if (!saveRes.success) console.warn("Salvataggio anagrafica parziale o fallito lato server.");
+
+            // B. AGGIORNA MEMORIA LOCALE (per coerenza dashboard)
+            if (memberRef) {
+                Object.assign(memberRef, updatePayload);
+                const idCLow = idC.toLowerCase();
+                if (window.globalData.atleti[idCLow]) Object.assign(window.globalData.atleti[idCLow], updatePayload);
+                if (window.globalData.taglieKit[idCLow]) Object.assign(window.globalData.taglieKit[idCLow], updatePayload);
+                if (window.globalData.privacyData[idCLow]) Object.assign(window.globalData.privacyData[idCLow], updatePayload);
+            }
+
+            // C. PREPARA ITEM PER CARRELLO
+            itemsToAdd.push({
+                email: window.globalData.userEmail,
+                idContatto: idC,
+                nomeMembro: memberRef ? `${memberRef.Nome} ${memberRef.Cognome}` : "Socio",
+                idArticolo: art.ID_Articolo,
+                idCategoria: art.ID_Categoria,
+                // --- FIX: Salviamo il Titolo ---
+                nomeArticolo: art.Titolo_Articolo || art.Nome_Articolo,
+                prezzoBase: window.calculateLivePrice(art).price,
+                metadati: metaData,
+                addedAt: Date.now()
+            });
+        }
+
+        // 3. SALVATAGGIO NEL CARRELLO PERSISTENTE (GAS)
+        await Promise.all(itemsToAdd.map(item => callGAS("addToCartPersist", item)));
+
+        // 4. AGGIORNAMENTO UI
+        itemsToAdd.forEach(i => window.cart.push({ ...i, finalPrice: i.prezzoBase, scontiDettaglio: [] }));
         window.recalculateCart();
-
-        // 4. Aggiornamento UI
         window.renderCartUI();
-        
-        console.log("✅ Articolo rimosso con successo.");
+
+        // Chiusura modale
+        const modal = bootstrap.Modal.getInstance(document.getElementById('modalConfiguratore'));
+        if (modal) modal.hide();
+
+        alert("✅ Dati salvati e articolo aggiunto al carrello!");
 
     } catch (e) {
-        console.error("Errore rimozione:", e);
-        alert("Si è verificato un errore durante la rimozione: " + e.message);
+        console.error("❌ Errore critico in addToCart:", e);
+        alert("Si è verificato un errore: " + e.message);
     } finally {
         if (loader) loader.style.display = 'none';
     }
 };
 
 /**
- * Tenta di applicare il codice coupon inserito dall'utente
+ * --- NAVIGAZIONE ---
  */
-/**
- * Tenta di applicare il codice coupon inserito dall'utente
- */
-window.applyCoupon = function() {
-    const input = document.getElementById('cart_coupon_input');
-    if (!input) return;
+window.closeShop = () => {
+    // Pulizia sessione (opzionale) e ritorno alla home
+    window.location.href = "index.html";
+};
 
-    const code = input.value.trim().toUpperCase();
-    
-    if (!code) {
-        window.appliedCouponCode = "";
-        window.couponFeedbackHTML = "";
-        window.recalculateCart();
-        return;
+// Se hai un pulsante di checkout, aggiungi anche questo:
+window.checkout = async function () {
+    if (window.cart.length === 0) return;
+
+    // Recupero dati detrazione se attiva
+    const infoOrdine = {
+        detrazioneAttiva: window.isDetrazioneActive,
+        nomeGenitore: "",
+        cfGenitore: window.fiscalCF || "",
+        emailGenitore: window.fiscalEmail || ""
+    };
+
+    if (window.isDetrazioneActive) {
+        const sel = document.getElementById('f_genitore_detrazione');
+        if (!sel || !sel.value) return alert("Seleziona a chi intestare la ricevuta per la detrazione.");
+        infoOrdine.nomeGenitore = sel.options[sel.selectedIndex].text;
     }
 
-    const scontoTrovato = (window.shopCatalog.sconti || []).find(s => 
-        (s.Codice_Coupon || "").toString().trim().toUpperCase() === code &&
-        (s.Attivo === true || s.Attivo === "TRUE" || s.Attivo === "VERO")
-    );
+    if (!confirm("Confermi l'invio dell'ordine? Verrai contattato dalla segreteria per il pagamento.")) return;
 
-    if (scontoTrovato) {
-        window.appliedCouponCode = code;
-        window.couponFeedbackHTML = `
-            <div class="alert alert-success py-1 px-2 mt-2 small fw-bold animate__animated animate__pulse">
-                <i class="fas fa-check-circle me-1"></i> Coupon "${code}" applicato!
-            </div>`;
-    } else {
-        window.appliedCouponCode = ""; // Reset se sbagliato
-        window.couponFeedbackHTML = `
-            <div class="alert alert-danger py-1 px-2 mt-2 small fw-bold animate__animated animate__shakeX">
-                <i class="fas fa-times-circle me-1"></i> Coupon non valido o scaduto.
-            </div>`;
+    const loader = document.getElementById('loading-overlay');
+    if (loader) loader.style.setProperty('display', 'flex', 'important');
+
+    try {
+        // Chiamata al ponte GAS per processare l'ordine finale
+        const res = await callGAS("processaOrdineCompleto", {
+            carrello: window.cart,
+            infoOrdine: infoOrdine
+        });
+
+        if (res.success) {
+            alert("🎉 Ordine registrato con successo! Numero Ordine: " + res.numOrdine);
+            window.cart = [];
+            window.location.href = "index.html";
+        } else {
+            throw new Error(res.error);
+        }
+    } catch (e) {
+        alert("Errore durante il checkout: " + e.message);
+    } finally {
+        if (loader) loader.style.setProperty('display', 'none', 'important');
     }
-
-    // Ora ricalcoliamo: la renderCartUI userà window.couponFeedbackHTML
-    window.recalculateCart();
 };

@@ -3,14 +3,14 @@ import { onAuthStateChanged, signOut, getRedirectResult } from "firebase/auth";
 import { resettaPassword } from "./auth.js"; // <--- AGGIUNGI L'IMPORT
 
 // UNIFICA QUI TUTTI GLI IMPORT DA AUTH.JS
-import { registraNuovoUtente, loginEmailPass, loginConGoogle } from "./auth.js"; 
+import { registraNuovoUtente, loginEmailPass, loginConGoogle } from "./auth.js";
 
 import { recuperaEmailDaCF } from "./auth.js";
 import { callGAS } from "./utils.js";
 
 
 // --- 1. DICHIARAZIONE GLOBALE DEL LUCCHETTO (Fondamentale qui!) ---
-let isRegistering = false; 
+let isRegistering = false;
 console.log("🚀 MyOval Main caricato - v.3.0.3");
 
 // --- 1. UTILITY (Spostata in alto per evitare ReferenceError) ---
@@ -50,7 +50,7 @@ onAuthStateChanged(auth, async (user) => {
 
     if (user) {
         console.log("🟢 Utente rilevato:", user.email);
-        
+
         const email = user.email.toLowerCase();
         const username = email.split('@')[0];
         const isNumeric = /^\d+$/.test(username);
@@ -62,7 +62,7 @@ onAuthStateChanged(auth, async (user) => {
             // ==========================================================
             // CASO A: SOCIO / ESTERNO
             // ==========================================================
-            
+
             // 1. Controllo verifica Email (fondamentale per utenti Gmail)
             if (!isInternal && !user.emailVerified) {
                 if (errorDiv) errorDiv.innerText = "Verifica la tua email per accedere.";
@@ -83,20 +83,16 @@ onAuthStateChanged(auth, async (user) => {
             if (loginScreen) loginScreen.classList.add('d-none');
             if (appPortaleScreen) appPortaleScreen.classList.remove('d-none');
             if (appGestionaleScreen) appGestionaleScreen.classList.add('d-none');
-            
+
             if (errorDiv) errorDiv.innerText = "";
 
             try {
-                // --- NOVITÀ: Carichiamo sia il Portale che lo Shop ---
-                // Importiamo shop.js qui per assicurarci che window.handleIscrizioniClick sia definito
-                await import('./shop.js?v=2.2.0');
-                
                 const { initPortal } = await import('./portal.js?v=2.2.0');
                 await initPortal(user);
-                
+
                 console.log("✅ Moduli Portale e Shop caricati correttamente.");
-            } catch (err) { 
-                console.error("❌ Errore caricamento moduli portale:", err); 
+            } catch (err) {
+                console.error("❌ Errore caricamento moduli portale:", err);
             }
 
         } else {
@@ -159,7 +155,7 @@ safeBind('btn-google', 'click', async () => {
     try {
         console.log("🚀 Avvio login Google...");
         // CHIAMIAMO LA FUNZIONE, non il provider
-        await loginConGoogle(); 
+        await loginConGoogle();
     } catch (err) {
         console.error("Errore:", err);
         alert("Errore accesso Google: " + err.message);
@@ -221,7 +217,7 @@ safeBind('btn-register', 'click', async () => {
         if (errorDiv) errorDiv.innerText = "Creazione account in corso...";
 
         console.log("🚀 Chiamata UNICA a registraNuovoUtente...");
-        
+
         await registraNuovoUtente(email, pass, cf);
 
         // 3. SUCCESSO
@@ -230,14 +226,14 @@ safeBind('btn-register', 'click', async () => {
 
     } catch (error) {
         console.error("❌ Errore:", error.code);
-        
+
         // 4. RESET IN CASO DI ERRORE
         isRegistering = false;
         if (btn) {
             btn.disabled = false;
             btn.innerText = "REGISTRATI";
         }
-        
+
         let msg = "Errore durante la registrazione.";
         if (error.code === 'auth/email-already-in-use') msg = "Email già registrata.";
         if (errorDiv) errorDiv.innerText = msg;
@@ -279,7 +275,7 @@ safeBind('link-forgot-email', 'click', async () => {
     try {
         const { recuperaEmailDaCF } = await import('./auth.js');
         const email = await recuperaEmailDaCF(cf.toUpperCase().trim());
-        
+
         // Mascheriamo l'email per privacy (es: f*******o@rugbymilano.it)
         const [user, domain] = email.split("@");
         const masked = user.substring(0, 1) + "*".repeat(user.length - 2) + user.slice(-1) + "@" + domain;
@@ -293,3 +289,30 @@ safeBind('link-forgot-email', 'click', async () => {
         alert(e.message);
     }
 });
+
+// Funzione di lancio centralizzata (Sposta qui la logica)
+const eseguiLancioShop = () => {
+    console.log("🚀 Avvio transizione verso lo Shop Standalone...");
+
+    // 1. Validazione Bolle
+    const bubbles = document.querySelectorAll('.family-item[id^="f-"]');
+    const allValid = Array.from(bubbles).every(b => b.classList.contains('is-valid-member'));
+
+    if (bubbles.length === 0 || !allValid) {
+        alert("📢 ATTENZIONE\n\nDevi completare le anagrafiche di TUTTI i componenti della famiglia (bolle verdi) prima di procedere.");
+        return;
+    }
+
+    // 2. Impacchettamento Dati
+    const dataToPass = {
+        ...window.globalData,
+        selectedMemberIndex: window.currentMemberIndex
+    };
+
+    // 3. Salvataggio e Redirect
+    sessionStorage.setItem('myoval_shared_data', JSON.stringify(dataToPass));
+    window.location.href = "shop.html";
+};
+
+// Colleghiamo il pulsante usando safeBind (che hai già nel file)
+safeBind('btn-main-iscrizioni', 'click', eseguiLancioShop);

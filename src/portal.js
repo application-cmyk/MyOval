@@ -9,7 +9,7 @@ import { callGAS, mapArraysToObjects, formattaDataRugby } from "./utils.js";
 export async function initPortal(user) {
     const loading = document.getElementById('loading-overlay');
     const errorContainer = document.getElementById('global-error-container');
-    
+
     if (loading) loading.style.display = 'flex';
     if (errorContainer) errorContainer.classList.add('d-none'); // Reset errori precedenti
 
@@ -43,7 +43,7 @@ export async function initPortal(user) {
             // Caso Utente Club: andiamo diretti su GAS col FIRCode
             gasAction = "GetDatiFamigliaAnagTesseratiFC";
             gasParams = { firCode: username.toString() };
-        } 
+        }
         else {
             // Caso Utente Esterno: cerchiamo l'account registrato in Firestore
             const accountSnap = await getDoc(doc(db, "accounts", email));
@@ -59,9 +59,9 @@ export async function initPortal(user) {
 
         // --- 3. CARICAMENTO DATI PARALLELO (GAS + FIRESTORE) ---
         console.log(`📡 Esecuzione Bridge: ${gasAction}...`);
-        
+
         let rawRes, uiConfig, servizi;
-        
+
         try {
             [rawRes, uiConfig, servizi] = await Promise.all([
                 callGAS(gasAction, gasParams),
@@ -77,7 +77,7 @@ export async function initPortal(user) {
 
         // --- 4. MAPPING DATI ---
         const famigliaOggetti = mapArraysToObjects(rawRes.famiglia);
-        
+
         const creaMappaPerID = (arrayOggetti) => {
             const mappa = {};
             arrayOggetti.forEach(obj => {
@@ -113,7 +113,7 @@ export async function initPortal(user) {
         };
 
         // --- 7. AGGIORNAMENTO INTERFACCIA ---
-        
+
         // A. Scriviamo l'email nell'header
         const emailLabel = document.getElementById('user-email-display');
         if (emailLabel) emailLabel.innerText = email;
@@ -125,10 +125,10 @@ export async function initPortal(user) {
         // C. Gestione Viste
         document.getElementById('onboarding-view')?.classList.add('d-none');
         document.getElementById('dashboard-view')?.classList.remove('d-none');
-        
+
         // D. Generazione Bolle e Bottoni
         buildFamilyUI(famigliaOggetti);
-        
+
         const { buildFunzioniUI, validateAllMembers } = await import('./anagrafica.js');
         buildFunzioniUI(servizi);
         validateAllMembers();
@@ -152,12 +152,12 @@ function mostraErroreBloccante(msg) {
     const errorCont = document.getElementById('global-error-container');
     const errorMsg = document.getElementById('global-error-msg');
     const dashboard = document.getElementById('dashboard-view');
-    
+
     if (errorCont && errorMsg) {
         errorMsg.innerText = msg;
         errorCont.classList.remove('d-none');
         if (dashboard) dashboard.classList.add('d-none');
-        
+
         // Scroll verso l'errore per essere sicuri che l'utente lo veda
         window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
@@ -204,11 +204,19 @@ async function getUIConfigByGroup(groupName) {
             // Gestione Liste
             let opzioni = [];
             const rawOpt = f.Opzioni_Lista || f.Opzioni || "";
-            if (f.Tipo_Input?.toLowerCase() === "lista") {
+            const tipoInput = (f.Tipo_Input || "").toLowerCase();
+
+            if (tipoInput === "lista") {
                 if (rawOpt.toUpperCase().startsWith("LISTE:")) {
                     const key = rawOpt.split(":")[1].trim().toUpperCase();
                     opzioni = dizionario[key] || [];
-                } else if (rawOpt) {
+                }
+                // --- AGGIUNTA QUESTA CONDIZIONE ---
+                else if (rawOpt.toUpperCase().startsWith("ARTICOLO:")) {
+                    // Passiamo la stringa intera, la risolverà shop.js al momento del click
+                    opzioni = rawOpt;
+                }
+                else if (rawOpt) {
                     opzioni = rawOpt.split(',').map(s => s.trim());
                 }
             }
@@ -265,28 +273,28 @@ async function getUIConfig() {
         allFields.forEach(f => {
             const pName = (f.Profilo || "ASSOCIATO").toUpperCase().trim();
             if (!profili[pName]) profili[pName] = [];
-            
+
             const idTecnico = f.ID_Campo || f.Campo || "";
-        
+
             profili[pName].push({
                 id: idTecnico,
                 label: f.Etichetta || idTecnico,
                 sezione: f.Sezione || "Generale",
                 larghezza: parseInt(f.Larghezza_3__4__6_12 || f.Larghezza || 4),
                 tipoInput: (f.Tipo_Input || "testo").toLowerCase(),
-                
+
                 // --- FIX MAPPING: Usa il nome esatto di Firestore ---
-                required: f.Obbligatorio === true, 
+                required: f.Obbligatorio === true,
                 readonly: f.Readonly === true,
                 visibile: f.Visibile === true || f.Visibile === undefined,
-                
+
                 tipoDato: f.Tipo_Dato || "Generale",
                 opzioni: generaOpzioni(f, dizionario),
                 ordine: parseInt(f.Ordine) || 0,
                 sottotitolo: f.Sottotitolo_Help_Text || ""
             });
         });
-        
+
         console.log("✅ Configurazione caricata per profili:", Object.keys(profili));
         return profili;
     } catch (e) {
@@ -334,12 +342,12 @@ export function buildFunzioni(lista) {
 async function getServiziOnlineByGroup(groupName) {
     try {
         console.log(`📥 Caricamento Servizi Ordinati per: ${groupName}`);
-        
+
         // 1. Recupero le abilitazioni con l'ordine specifico per questo gruppo
         const q = query(collection(db, "config_access"), where("Gruppo", "==", groupName.toUpperCase()));
         const accessSnap = await getDocs(q);
-        
-        
+
+
         const mappingAccesso = {}; // Funzione -> Ordine
         accessSnap.forEach(doc => {
             const d = doc.data();
@@ -354,11 +362,11 @@ async function getServiziOnlineByGroup(groupName) {
         // 2. Recupero i dettagli tecnici (features)
         const featuresSnap = await getDocs(collection(db, "features"));
         const listaFinal = [];
-        
+
         featuresSnap.forEach(doc => {
             const data = doc.data();
             const idFeature = doc.id.toLowerCase().trim();
-            
+
             if (mappingAccesso[idFeature] !== undefined) {
                 listaFinal.push({
                     nome: data.Nome || doc.id,
@@ -367,7 +375,7 @@ async function getServiziOnlineByGroup(groupName) {
                     target: data.Target || "_self",
                     sottotitolo: data.Sottotitolo_Help_Text || "",
                     // PRENDIAMO L'ORDINE DALLA TABELLA ACCESSI
-                    ordinePresentazione: mappingAccesso[idFeature] 
+                    ordinePresentazione: mappingAccesso[idFeature]
                 });
             }
         });
