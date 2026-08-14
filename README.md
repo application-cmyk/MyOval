@@ -28,3 +28,6 @@ reCAPTCHA Enterprise:
 
 Token IDX: E57094A9-3888-453D-A832-4A974423F89A
 
+
+firebase use staging (per lavorare/distribuire sull'ambiente di test)
+firebase use production (per lavorare/distribuire sull'ambiente di produzione)

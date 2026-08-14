@@ -1,7 +1,7 @@
 {
   "projects": {
     "production": "rugby-milano-app-16681",
-    "staging": "INSERISCI_PROJECT_ID_DI_TEST",
+    "staging": "rugby-milano-app-test",
     "default": "rugby-milano-app-16681"
   }
 }
