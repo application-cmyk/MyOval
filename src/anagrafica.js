@@ -1,16 +1,54 @@
-import { formattaDataRugby, safeSet, callGAS } from "./utils.js";
-import { resolveUrlParams } from "./utils.js"; // Importa la nuova utility
+import { formattaDataRugby, safeSet, callGAS, resolveUrlParams } from "./utils.js";
+
+/**
+ * TRASFORMATORE URL GOOGLE DRIVE (Versione Infallibile)
+ * Prende un link di visualizzazione e lo trasforma in un'immagine reale.
+ */
+function getThumbnailUrl(driveUrl) {
+    if (!driveUrl || driveUrl === "" || driveUrl === "undefined" || driveUrl === "null") {
+        return "https://placehold.co/200x150?text=Nessun+Documento";
+    }
+
+    // Se è già un'anteprima locale Base64, caricala direttamente
+    if (driveUrl.startsWith('data:')) return driveUrl;
+
+    // Se non è un link Google Drive, caricalo come URL normale
+    if (!driveUrl.includes('drive.google.com')) return driveUrl;
+
+    try {
+        // Estrazione ID: cerchiamo una stringa alfanumerica di almeno 25 caratteri
+        const match = driveUrl.match(/[-\w]{25,}/);
+        if (match && match[0]) {
+            const fileId = match[0];
+            // sz=w400 è la chiave: chiede a Google di generare il file immagine
+            return `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`;
+        }
+    } catch (e) {
+        console.error("❌ Errore critico parsing URL Drive:", driveUrl, e);
+    }
+
+    return "https://placehold.co/200x150?text=Errore+Link";
+}
 
 /**
  * Utility per estrarre valori in modo tollerante (case-insensitive e underscore-safe)
  */
+// Funzione di utilità per estrarre valori in modo tollerante
 function getValue(obj, key) {
     if (!obj || !key) return "";
+
+    // 1. Prova match esatto
     if (obj[key] !== undefined && obj[key] !== null) return obj[key];
-    const cleanSearch = key.toLowerCase().replace(/_/g, "");
-    const realKey = Object.keys(obj).find(k => k.toLowerCase().replace(/_/g, "") === cleanSearch);
+
+    // 2. Prova match "Agnostico" (rimuove spazi e underscore ovunque)
+    const cleanSearch = key.toLowerCase().replace(/[\s_]/g, "");
+    const realKey = Object.keys(obj).find(k => {
+        return k.toLowerCase().replace(/[\s_]/g, "") === cleanSearch;
+    });
+
     return realKey ? obj[realKey] : "";
 }
+
 
 /**
  * 1. DISEGNA LE BOLLE DELLA FAMIGLIA
@@ -210,102 +248,79 @@ export function renderAnagraficaForm(memberData, config, isAtleta, targetContain
     const container = document.getElementById(targetContainerId);
     if (!container) return;
 
-    if (!config || config.length === 0) {
-        container.innerHTML = `<div class="p-2 text-center text-muted small">Configurazione non disponibile.</div>`;
-        return;
-    }
-
     const campiOrdinati = [...config].sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
-
-    // Usiamo g-2 invece di g-3 per ridurre lo spazio tra le colonne
-    let html = '<div class="row g-2">';
-    let lastSection = "";
+    let html = '<div class="row g-2">', lastSection = "";
 
     campiOrdinati.forEach(conf => {
-        if (conf.visibile === false) return;
-
-        // Filtro Atleta (Se il campo è tecnico e l'utente non è atleta, salta)
-        const tDato = (conf.tipoDato || "").toLowerCase().trim();
+        if (!conf.visibile) return;
+        const tDato = (conf.tipoDato || "").toLowerCase();
         if (tDato.includes("atleti") && !isAtleta) return;
 
-        // Sezione compatta
         if (conf.sezione !== lastSection) {
             lastSection = conf.sezione;
             html += `<div class="col-12"><div class="rm-section-title mt-2 mb-1" style="font-size:0.75rem; padding:4px 10px;">${lastSection}</div></div>`;
         }
 
-        // Recupero valore e validazione
         const valore = getValue(memberData, conf.id);
-        const missing = isFieldMissing(conf, memberData, isAtleta);
-        const errorClass = missing ? "is-invalid" : "";
+        const errorClass = isFieldMissing(conf, memberData, isAtleta) ? "is-invalid" : "";
         const asterisco = (conf.required && !conf.readonly) ? '<span class="text-danger fw-bold">*</span>' : '';
 
-        // Override opzioni (per Squadre nello Shop)
         let currentConf = { ...conf };
         if (optionsOverride && optionsOverride[conf.id]) {
             currentConf.opzioni = optionsOverride[conf.id];
         }
 
-        const colSize = conf.larghezza || 4;
-        const helpHtml = conf.sottotitolo ? `<span class="help-text" style="font-size:0.6rem;">${conf.sottotitolo}</span>` : "";
+        // --- APPLICAZIONE LARGHEZZA (col-md-X) ---
+        const colSize = currentConf.larghezza || 4;
 
         html += `
             <div class="col-md-${colSize} col-12 mb-1">
-                <label class="label-xs" style="font-size:0.65rem; margin-bottom:1px;">${conf.label}${asterisco}</label>
-                ${generaInputHtml(currentConf, valore, errorClass)}
-                ${helpHtml}
+                <label class="label-xs" style="font-size:0.65rem; margin-bottom:1px;">${currentConf.label}${asterisco}</label>
+                ${generaInputHtml(currentConf, valore, errorClass, memberData)}
+                <!-- --- VISUALIZZAZIONE SOTTOTITOLO --- -->
+                ${currentConf.sottotitolo ? `<span class="help-text" style="font-size:0.6rem; display:block; color:#888; font-style:italic;">${currentConf.sottotitolo}</span>` : ""}
             </div>`;
     });
 
     html += '</div>';
-
-    // Bottone Salva rimpicciolito (btn-sm)
     if (targetContainerId === 'anagrafica-form-content') {
-        html += `
-            <div class="d-flex justify-content-end mt-3 pt-2 border-top">
-                <button class="btn btn-success btn-sm fw-bold px-4 shadow-sm" onclick="salvaSchedaAttiva()">
-                    <i class="fas fa-save me-1"></i> SALVA MODIFICHE
-                </button>
-            </div>`;
+        html += '<div class="d-flex justify-content-end mt-3 pt-2 border-top"><button class="btn btn-success btn-sm fw-bold px-4 shadow-sm" onclick="salvaSchedaAttiva()">SALVA MODIFICHE</button></div>';
     }
-
     container.innerHTML = html;
-
-    // Ri-aggancio listener (Invariato)
-    agganciaListenerValidazione(container);
+    agganciaListenerValidazione(container, targetContainerId);
 }
 
 
 // Funzione helper per non appesantire il render
-function agganciaListenerValidazione(container, targetContainerId) { // <--- Nome uniformato
-    container.querySelectorAll('.val-field').forEach(el => {
+function agganciaListenerValidazione(container, targetId) {
+    container.querySelectorAll('.val-field, .multi-check-part').forEach(el => {
         const validate = (e) => {
             const input = e.target;
+            if (input.classList.contains('multi-check-part')) {
+                const parent = input.closest('.multi-list-container');
+                const fId = parent.getAttribute('data-id');
+                const hiddenInp = document.getElementById(`val_${fId}`);
+                const vals = Array.from(parent.querySelectorAll('.multi-check-part:checked')).map(i => i.value);
+                if (hiddenInp) {
+                    hiddenInp.value = vals.join(', ');
+                    hiddenInp.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+                return;
+            }
             const fieldId = input.getAttribute('data-id');
             const isReq = input.hasAttribute('required');
-
-            // Valore reale
             const currentVal = input.type === 'checkbox' ? input.checked : input.value;
-
-            // Logica bordo rosso
             if (isReq) {
-                const isEmpty = input.type === 'checkbox' ? !input.checked : (!input.value || input.value.trim() === "");
-                if (isEmpty) {
-                    input.classList.add('is-invalid');
-                } else {
-                    input.classList.remove('is-invalid');
-                }
+                const empty = input.type === 'checkbox' ? !input.checked : !input.value.trim();
+                if (empty) input.classList.add('is-invalid'); else input.classList.remove('is-invalid');
+                const mCont = container.querySelector(`.multi-list-container[data-id="${fieldId}"]`);
+                if (mCont) { if (empty) mCont.style.borderColor = "#dc3545"; else mCont.style.borderColor = "#ced4da"; }
             }
-
-            // --- FIX ERRORE: Aggiorna memoria locale solo se siamo nel portale principale ---
-            if (targetContainerId === 'anagrafica-form-content') {
-                if (window.globalData && window.globalData.famiglia.data[window.currentMemberIndex]) {
-                    window.globalData.famiglia.data[window.currentMemberIndex][fieldId] = currentVal;
-                    checkMemberValidation(window.currentMemberIndex);
-                }
+            if (targetId === 'anagrafica-form-content' && window.globalData) {
+                window.globalData.famiglia.data[window.currentMemberIndex][fieldId] = currentVal;
+                checkMemberValidation(window.currentMemberIndex);
             }
         };
-
         el.addEventListener('input', validate);
         el.addEventListener('change', validate);
     });
@@ -314,86 +329,109 @@ function agganciaListenerValidazione(container, targetContainerId) { // <--- Nom
 /**
  * 6. GENERATORE INPUT
  */
-function generaInputHtml(conf, valore, errorClass = "") {
-    const tipo = (conf.tipoInput || "testo").toLowerCase();
+/**
+ * Generatore di input HTML con log diagnostici avanzati per la risoluzione dinamica
+ */
+/**
+ * Generatore di input HTML con log diagnostici avanzati per la risoluzione dinamica
+ */
+function generaInputHtml(conf, valore, errorClass = "", memberData = {}, optionsOverride = null) {
+    const tipo = (conf.tipoInput || "testo").toLowerCase().trim();
     const commonClass = `form-control form-control-sm val-field shadow-none ${errorClass}`;
     const selectClass = `form-select form-select-sm val-field shadow-none ${errorClass}`;
     const ro = conf.readonly ? "readonly disabled style='background-color: #f8f9fa; cursor: not-allowed;'" : "";
     const rq = conf.required ? "required" : "";
     const v = (valore === null || valore === undefined) ? "" : valore;
 
+    let options = Array.isArray(conf.opzioni) ? conf.opzioni : [];
+
+    // --- LOGICA DINAMICA ARTICOLO (Puntatore Articolo:...) ---
+    if (typeof conf.opzioni === "string" && conf.opzioni.toUpperCase().startsWith("ARTICOLO:")) {
+        const targetCol = conf.opzioni.split(":")[1];
+
+        // ESTRAZIONE PARAMETRI (Usiamo getValue per massima sicurezza)
+        const areaAtl = (getValue(memberData, "Area")).toUpperCase().trim();
+        const catAtl = (getValue(memberData, "Categoria_Fed") || getValue(memberData, "Categoria")).toUpperCase().trim();
+        const tipoAtl = (getValue(memberData, "Tipo")).toUpperCase().trim();
+
+        const article = (window.globalData.articoli || []).find(a =>
+            (a.Tipo_Articolo === "TESSERAMENTO") &&
+            (a.Area || "").toUpperCase().trim() === areaAtl &&
+            (a.Categoria_Federale || a.Categoria_Fed || "").toUpperCase().trim() === catAtl &&
+            (a.Tipo_Tesseramento || a.Tipo || "").toUpperCase().trim() === tipoAtl
+        );
+
+        if (article && article[targetCol]) {
+            options = article[targetCol].split(',').map(s => s.trim()).filter(Boolean);
+            console.log(`🎯 [${conf.id}] Squadre caricate dall'articolo: ${article.Nome_Articolo}`);
+        }
+    }
+
     switch (tipo) {
+        case "multi-lista":
+            const currentSelected = v.toString().toLowerCase().split(',').map(s => s.trim());
+            let multiHtml = `<div class="multi-list-container ${errorClass}" data-id="${conf.id}" style="border: 1px solid #ced4da; padding: 10px; border-radius: 8px; background: #fff; max-height: 150px; overflow-y: auto;">`;
+            if (options.length === 0) multiHtml += `<div class="small text-muted italic p-1">Nessuna opzione trovata</div>`;
+            options.forEach((o, idx) => {
+                const optStr = o.toString().trim();
+                const isChecked = (options.length === 1 || currentSelected.includes(optStr.toLowerCase())) ? "checked" : "";
+                multiHtml += `<div class="d-flex align-items-center mb-1"><input type="checkbox" class="multi-check-part me-2" id="chk_${conf.id}_${idx}" value="${optStr}" ${isChecked} ${conf.readonly ? 'disabled' : ''} style="width:16px;height:16px;"><label class="small mb-0" for="chk_${conf.id}_${idx}" style="cursor:pointer;flex-grow:1;">${optStr}</label></div>`;
+            });
+            return multiHtml + `</div><input type="hidden" class="val-field" data-id="${conf.id}" id="val_${conf.id}" value="${v}" ${rq}>`;
+
         case "lista":
-            const options = Array.isArray(conf.opzioni) ? conf.opzioni : [];
-            let optionsHtml = `<option value="">-</option>`;
-
-            // Il valore dell'anagrafica pulito (es. "U18, Cadetti" -> "u18, cadetti")
-            const valAnagrafica = v.toString().toLowerCase().trim();
-
+            let opts = `<option value="">-</option>`;
+            const valAnag = v.toString().toLowerCase().trim();
             options.forEach(o => {
                 const optStr = o.toString().trim();
-                const optLower = optStr.toLowerCase();
-                let isSelected = "";
-
-                // --- LOGICA RICHIESTA ---
-                // 1. Se la lista fornita dall'articolo ha solo 1 opzione, viene assegnata automaticamente
-                if (options.length === 1) {
-                    isSelected = "selected";
-                }
-                // 2. Se Matilde ha già quella squadra in anagrafica (anche tra tante), pre-seleziona
-                else if (valAnagrafica !== "" && valAnagrafica.includes(optLower)) {
-                    isSelected = "selected";
-                }
-
-                optionsHtml += `<option value="${optStr}" ${isSelected}>${optStr}</option>`;
+                const isSel = (options.length === 1 || (valAnag !== "" && valAnag.includes(optStr.toLowerCase()))) ? "selected" : "";
+                opts += `<option value="${optStr}" ${isSel}>${optStr}</option>`;
             });
-
-            return `<select class="${selectClass}" data-id="${conf.id}" ${conf.readonly ? 'disabled' : ''} ${rq}>${optionsHtml}</select>`;
-
-        case "data":
-            let ds = "";
-            if (v) {
-                const s = v.toString();
-                if (s.includes('/')) {
-                    const p = s.split('/');
-                    if (p.length === 3) ds = `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
-                } else { ds = s.split('T')[0]; }
-            }
-            return `<input type="date" class="${commonClass}" data-id="${conf.id}" value="${ds}" ${ro} ${rq}>`;
+            return `<select class="${selectClass}" data-id="${conf.id}" ${conf.readonly ? 'disabled' : ''} ${rq}>${opts}</select>`;
 
         case "switch":
         case "checkbox":
-            const isChecked = forceBool(v);
+            return `<div class="form-check form-switch pt-1"><input class="form-check-input val-field ${errorClass}" type="checkbox" role="switch" data-id="${conf.id}" ${forceBool(v) ? 'checked' : ''} ${conf.readonly ? 'disabled' : ''} ${rq}></div>`;
 
-            return `
-        <div class="form-check form-switch">
-            <input class="form-check-input val-field ${errorClass}" 
-                   type="checkbox" 
-                   role="switch" 
-                   data-id="${conf.id}" 
-                   ${isChecked ? 'checked' : ''} 
-                   ${conf.readonly ? 'disabled' : ''} 
-                   ${conf.required ? 'required' : ''}
-                   style="float: none; margin-left: 0;">
-        </div>`;
+        case "data":
+            let ds = v.toString().includes('/') ? v.split('/').reverse().join('-') : v.split('T')[0];
+            return `<input type="date" class="${commonClass}" data-id="${conf.id}" value="${ds}" ${ro} ${rq}>`;
 
         case "immagine":
             const imgErr = errorClass ? "img-invalid" : "";
-            // Usa getThumbnailUrl se definita in utils.js
-            const thumb = (typeof getThumbnailUrl === "function") ? getThumbnailUrl(v) : v;
+            const thumb = getThumbnailUrl(v);
+
             return `
-                <div class="d-flex align-items-center gap-2">
-                    <img src="${thumb || 'https://placehold.co/40x40?text=Doc'}" 
-                         id="prev_${conf.id}" class="img-doc-preview shadow-sm ${imgErr}" 
-                         style="width:40px;height:40px;border-radius:6px;object-fit:contain;" 
-                         onclick="window.open('${v}','_blank')">
-                    <input type="hidden" class="val-field ${errorClass}" data-id="${conf.id}" id="val_${conf.id}" value="${v}" ${rq}>
+                <div class="d-flex align-items-center gap-2" id="container_${conf.id}">
+                    <div class="position-relative">
+                        <!-- Rimosso lo stile inline width/height per usare quello rettangolare del CSS -->
+                        <img src="${thumb}" 
+                        id="prev_${conf.id}" 
+                        class="img-doc-preview shadow-sm ${imgErr}" 
+                     onclick="window.open('${v}','_blank')"
+                     title="Clicca per visualizzare">
+                
+                ${!conf.readonly ? `
+                    <label for="file_${conf.id}" class="btn btn-outline-danger btn-xs p-1 position-absolute" 
+                           style="bottom: -5px; right: -5px; font-size:8px; border-radius:10px; background:white; line-height:1; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor:pointer;">
+                        CARICA
+                    </label>
+                    <input type="file" id="file_${conf.id}" class="d-none" accept="image/*,application/pdf" 
+                           onchange="handleFileUpload(this, '${conf.id}', '${conf.label}')">
+                ` : ''}
+                    </div>
+            
+            <div id="spin_${conf.id}" class="spinner-border spinner-border-sm text-danger d-none ms-1"></div>
+            
+            <input type="hidden" class="val-field ${errorClass}" data-id="${conf.id}" id="val_${conf.id}" value="${v}" ${rq}>
                 </div>`;
 
         default:
             return `<input type="text" class="${commonClass}" data-id="${conf.id}" value="${v}" placeholder="..." ${ro} ${rq}>`;
     }
 }
+
+// Funzione helper per pulizia HTML multi-lista
 
 /**
  * 7. GESTORE UPLOAD (GOOGLE DRIVE)
@@ -402,149 +440,169 @@ window.handleFileUpload = async function (input, fieldId, label) {
     const file = input.files[0];
     if (!file) return;
 
+    // Riferimenti agli elementi della pagina
     const spinner = document.getElementById(`spin_${fieldId}`);
     const preview = document.getElementById(`prev_${fieldId}`);
     const hiddenInput = document.getElementById(`val_${fieldId}`);
     const member = window.globalData.famiglia.data[window.currentMemberIndex];
 
     try {
-        // 1. MOSTRA ANTEPRIMA LOCALE IMMEDIATA (Feedback istantaneo)
+        // Mostra lo spinner
+        if (spinner) spinner.classList.remove('d-none');
+
         const reader = new FileReader();
         reader.readAsDataURL(file);
+
         reader.onload = async (e) => {
-            const base64Data = e.target.result;
+            const base64Full = e.target.result; // Contiene "data:image/png;base64,..."
 
-            // Facciamo vedere l'immagine all'utente SUBITO
+            // Anteprima locale immediata per l'utente (sbiadita)
             if (preview) {
-                preview.src = base64Data;
-                preview.style.opacity = "0.5"; // La mettiamo un po' sbiadita mentre carica
+                preview.src = base64Full;
+                preview.style.opacity = "0.4";
             }
-            if (spinner) spinner.classList.remove('d-none');
 
-            // Costruiamo il nome file professionale
+            // Costruzione nome file professionale per Drive
             const cognome = (member.Cognome || "Socio").trim().toUpperCase();
             const nome = (member.Nome || "").trim().toUpperCase();
             const idSocio = member.IDContatto || "000";
-            const tipoDoc = label.replace(/\s+/g, '_').toUpperCase();
-            const extension = file.name.split('.').pop();
-            const filename = `${tipoDoc} - ${cognome} ${nome} (${idSocio}) - ${Date.now()}.${extension}`;
+            const ext = file.name.split('.').pop();
+            const filename = `${label.toUpperCase()} - ${cognome} ${nome} (${idSocio}) - ${Date.now()}.${ext}`;
 
             try {
-                // 2. INVIO AL SERVER
+                // --- CHIAMATA AL PONTE GAS ---
+                // Spediamo base64 pulito (senza prefisso) e mimeType separato per risolvere l'errore newBlob
                 const res = await callGAS("uploadDocumento", {
-                    base64: base64Data,
+                    base64: base64Full.split(',')[1],
+                    mimeType: file.type,
                     filename: filename
                 });
 
                 if (res && res.url) {
+                    // TRASFORMAZIONE URL: Converte link visualizzazione in miniatura reale
+                    const finalThumbUrl = getThumbnailUrl(res.url);
+
+                    if (preview) {
+                        preview.src = finalThumbUrl; // Carica la miniatura Google
+                        preview.style.opacity = "1"; // Torna nitida
+                        preview.style.borderColor = "#28a745"; // Bordo verde conferma
+                        // Aggiorna il click affinché apra il file originale
+                        preview.onclick = () => window.open(res.url, '_blank');
+                    }
+
+                    // Salva l'URL originale nel campo nascosto per la funzione SALVA
                     if (hiddenInput) {
                         hiddenInput.value = res.url;
-                        // Forziamo l'aggiornamento manuale del valore nel campo
-                        hiddenInput.setAttribute('value', res.url);
+                        // Notifica il sistema per la validazione delle bolle
+                        hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
                     }
-                    if (preview) preview.src = getThumbnailUrl(res.url);
 
-                    // --- SINCRONIZZAZIONE CACHE IMMEDIATA ---
-                    const idC = member.IDContatto.toString().toLowerCase();
+                    // --- AGGIORNAMENTO CACHE LOCALE ---
+                    const idCLow = idSocio.toString().toLowerCase().trim();
+                    member[fieldId] = res.url;
 
-                    // Aggiorniamo il campo ovunque possa trovarsi
-                    member[fieldId] = res.url; // Aggiorna anagrafica
-                    if (window.globalData.atleti[idC]) window.globalData.atleti[idC][fieldId] = res.url;
-                    if (window.globalData.taglieKit[idC]) window.globalData.taglieKit[idC][fieldId] = res.url;
-                    if (window.globalData.privacyData[idC]) window.globalData.privacyData[idC][fieldId] = res.url;
+                    // Aggiorna anche le mappe tecniche se presenti
+                    if (window.globalData.atleti[idCLow]) window.globalData.atleti[idCLow][fieldId] = res.url;
+                    if (window.globalData.privacyData[idCLow]) window.globalData.privacyData[idCLow][fieldId] = res.url;
 
-                    // Ricalcola subito la validazione
-                    checkMemberValidation(window.currentMemberIndex);
-                    alert("✅ Immagine pronta. Ricorda di cliccare SALVA in fondo per confermare.");
+                    // Aggiorna la valigia sessionStorage per non perdere il dato tornando indietro
+                    sessionStorage.setItem('myoval_shared_data', JSON.stringify(window.globalData));
+
+                    alert("✅ Immagine caricata correttamente!\n\nRicorda di cliccare SALVA in fondo per confermare.");
                 }
             } catch (err) {
+                console.error("Errore bridge:", err);
                 alert("❌ Errore caricamento: " + err.message);
-                if (preview) preview.src = "https://placehold.co/150x150?text=Errore";
+                if (preview) preview.src = "https://placehold.co/150x150?text=Errore+Upload";
             } finally {
+                // Nascondi lo spinner
                 if (spinner) spinner.classList.add('d-none');
             }
         };
     } catch (e) {
-        console.error("Errore FileReader:", e);
+        if (spinner) spinner.classList.add('d-none');
     }
 };
 
 /**
- * Utility per trasformare i link Drive in miniature visualizzabili nel browser
- */
-function getThumbnailUrl(driveUrl) {
-    if (!driveUrl || driveUrl === "") return "https://placehold.co/400x250?text=Nessun+Documento";
-    const match = driveUrl.match(/[-\w]{25,}/);
-    return match ? `https://drive.google.com/thumbnail?id=${match[0]}&sz=w400` : driveUrl;
-}
-
-// Utility per controllare se un valore è mancante (per lo stile immagine)
-function isMissingStyle(val, conf) {
-    if (!conf.required || conf.readonly) return false;
-    return (!val || val.toString().trim() === "" || val === "01/01/1900");
-}
-
-/**
- * 8. SALVATAGGIO SCHEDA (Via GAS Bridge)
- */
+* 8. SALVATAGGIO SCHEDA (Via GAS Bridge)
+*/
 window.salvaSchedaAttiva = async function () {
-    const btn = document.querySelector('button[onclick="salvaSchedaAttiva()"]');
-    const originalText = btn.innerHTML;
+    // 1. Recupero riferimenti e pulsante
+    const index = window.currentMemberIndex;
+    const member = window.globalData.famiglia.data[index];
+    if (!member) return alert("Errore: nessun membro selezionato.");
 
-    // Recuperiamo il membro attuale
-    const member = window.globalData.famiglia.data[window.currentMemberIndex];
-    const idC = member.IDContatto;
+    const btn = document.querySelector('button[onclick="salvaSchedaAttiva()"]');
+    const originalText = btn ? btn.innerHTML : "SALVA MODIFICHE";
 
     try {
-        // UI: Loading
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>SALVATAGGIO IN CORSO...';
+        // 2. UI: Stato di caricamento
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>SALVATAGGIO...';
+        }
 
-        // 1. RACCOLTA DATI
+        // 3. RACCOLTA DATI DAI CAMPI .val-field
         const fields = document.querySelectorAll('.val-field');
-        // Includiamo l'ID_Famiglia affinché GAS possa creare nuove righe correttamente
-        const payload = {
+        const updateData = {
             idContatto: member.IDContatto,
-            ID_Famiglia: window.globalData.idFamiglia
+            ID_Famiglia: window.globalData.idFamiglia // Passiamo l'ID famiglia per nuove righe su GAS
         };
 
         fields.forEach(f => {
             const id = f.getAttribute('data-id');
-            const val = f.type === 'checkbox' ? f.checked : f.value;
-            payload[id] = val;
+            if (!id) return;
 
-            // Sincronizza tutta la memoria locale per evitare "bolle rosse" post-salvataggio
-            const idC = member.IDContatto.toString().toLowerCase();
+            // Legge il valore in base al tipo di input
+            const val = f.type === 'checkbox' ? f.checked : f.value;
+
+            // Popola il pacchetto per il server
+            updateData[id] = val;
+
+            // --- AGGIORNAMENTO MEMORIA LOCALE (Sincronizzazione immediata) ---
+            // Aggiorna l'oggetto anagrafica principale
             member[id] = val;
-            if (window.globalData.atleti[idC]) window.globalData.atleti[idC][id] = val;
-            if (window.globalData.taglieKit[idC]) window.globalData.taglieKit[idC][id] = val;
-            if (window.globalData.privacyData[idC]) window.globalData.privacyData[idC][id] = val;
+
+            // Aggiorna anche le mappe tecniche se il campo appartiene a quelle sezioni
+            const idCLow = member.IDContatto.toString().toLowerCase().trim();
+            if (window.globalData.atleti[idCLow]) window.globalData.atleti[idCLow][id] = val;
+            if (window.globalData.taglieKit[idCLow]) window.globalData.taglieKit[idCLow][id] = val;
+            if (window.globalData.privacyData[idCLow]) window.globalData.privacyData[idCLow][id] = val;
         });
 
-        console.log("📤 Invio payload a GAS:", payload);
+        console.log("📤 Invio aggiornamento a GAS:", updateData);
 
-        // 3. CHIAMATA AL PONTE
-        const res = await callGAS("salvaDatiMembro", { payload: payload });
+        // 4. CHIAMATA AL PONTE GAS
+        const res = await callGAS("salvaDatiMembro", { payload: updateData });
 
         if (res && res.success) {
-            alert("✅ Dati salvati con successo nello Spreadsheet!");
+            // --- 5. AGGIORNAMENTO CACHE DI SESSIONE (La valigia) ---
+            // Fondamentale: salviamo lo stato aggiornato nel sessionStorage
+            // così se l'utente va nello Shop o ricarica, trova i dati nuovi.
+            sessionStorage.setItem('myoval_shared_data', JSON.stringify(window.globalData));
 
-            // 4. RE-VALIDAZIONE BOLLE
-            // Se l'utente ha riempito i campi mancanti, la bolla deve diventare verde
-            if (typeof checkMemberValidation === "function") {
-                checkMemberValidation(window.currentMemberIndex);
-            }
+            // 6. RE-VALIDAZIONE BOLLA
+            // Ricalcola se la bolla deve essere VERDE o ROSSA
+            checkMemberValidation(index);
+
+            alert("✅ Dati salvati con successo nello Spreadsheet!");
+        } else {
+            throw new Error(res ? res.error : "Errore sconosciuto lato server");
         }
 
     } catch (error) {
-        console.error("Errore durante il salvataggio:", error);
-        alert("❌ Errore di salvataggio: " + error.message);
+        console.error("❌ Errore durante il salvataggio:", error);
+        alert("Si è verificato un errore nel salvataggio: " + error.message);
     } finally {
-        // Ripristino pulsante
-        btn.disabled = false;
-        btn.innerHTML = originalText;
+        // 7. UI: Ripristino pulsante
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
     }
 };
+
 
 
 /**
@@ -588,36 +646,17 @@ function renderCodiciBadge(idSocio) {
  */
 function isFieldMissing(conf, memberData, isAtleta) {
     if (!conf.visibile || conf.readonly) return false;
-    const tDato = (conf.tipoDato || "").toLowerCase();
-    if (tDato.includes("atleti") && !isAtleta) return false;
-
+    if (conf.tipoDato?.toLowerCase().includes("atleti") && !isAtleta) return false;
     if (conf.required) {
         const val = getValue(memberData, conf.id);
-
-        // --- LOGICA SPECIFICA PER CHECKBOX/SWITCH ---
-        if (conf.tipoInput === "switch" || conf.tipoInput === "checkbox") {
-            // È "mancante" se non è spuntata (quindi se forceBool è false)
-            return !forceBool(val);
-        }
-
-        // Logica per campi testo/data
-        const vStr = (val !== null && val !== undefined) ? val.toString().trim() : "";
-        return (vStr === "" || vStr === "01/01/1900" || vStr === "1900-01-01");
+        if (conf.tipoInput === "switch" || conf.tipoInput === "checkbox" || conf.tipoInput === "multi-lista") return !forceBool(val);
+        const vStr = val ? val.toString().trim() : "";
+        return (vStr === "" || vStr === "01/01/1900");
     }
     return false;
 }
 
-/**
- * Converte qualunque valore proveniente da GAS/Spreadsheet in Booleano reale
- */
-function parseBool(val) {
-    if (val === true || val === 1) return true;
-    if (typeof val === "string") {
-        const s = val.toUpperCase().trim();
-        return s === "TRUE" || s === "SÌ" || s === "SI" || s === "ON" || s === "1";
-    }
-    return false;
-}
+
 
 /**
  * Forza qualunque valore (SÌ, VERO, TRUE, 1) a diventare un booleano Javascript true/false
@@ -626,7 +665,7 @@ function forceBool(val) {
     if (val === true || val === 1 || val === "true" || val === "TRUE") return true;
     if (typeof val === "string") {
         const s = val.toUpperCase().trim();
-        return s === "SÌ" || s === "SI" || s === "VERO" || s === "TRUE" || s === "1";
+        return s === "TRUE" || s === "SÌ" || s === "SI" || s === "VERO" || s === "ON" || s === "1";
     }
     return false;
 }
@@ -807,17 +846,20 @@ export function buildFunzioniUI(lista) {
         return;
     }
 
-    // Ordiniamo la lista prima di disegnarla
-    const listaOrdinata = [...lista].sort((a, b) => a.ordine - b.ordine);
+    // 1. ORDINAMENTO: Ora f.ordine esiste e contiene il numero di config_access
+    const listaOrdinata = [...lista].sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
 
+    // 2. SINCRONIZZAZIONE: Salviamo la lista ordinata nei dati globali
+    window.globalData.funzioni = listaOrdinata;
+
+    // 3. RENDERING: Usiamo l'indice (index) per chiamare la funzione di lancio
     container.innerHTML = listaOrdinata.map((f, index) => {
         const icona = f.tipo === 'IFRAME' ? 'fa-window-maximize' : 'fa-external-link-alt';
 
-        // Usiamo un indice per recuperare i dati dall'array globale ed evitare problemi di apici nell'URL
         return `
             <div class="col-6 col-md-4">
                 <div class="service-btn-compact h-100 animate__animated animate__fadeIn" 
-                     onclick="selectAndExecFunzione(${index})" 
+                     onclick="window.selectAndExecFunzione(${index})" 
                      style="cursor:pointer">
                     <i class="fas ${icona} text-danger me-2" style="font-size: 0.8rem;"></i>
                     <span class="fw-bold text-dark" style="font-size: 0.7rem; text-transform: uppercase;">${f.nome}</span>
@@ -854,3 +896,4 @@ window.renderAnagraficaForm = renderAnagraficaForm;
 window.selectMember = selectMember;
 window.salvaSchedaAttiva = salvaSchedaAttiva;
 window.buildFamilyUI = buildFamilyUI;
+window.buildFunzioniUI = (l) => { /* logic */ };

@@ -1,15 +1,15 @@
-const GAS_URL = "https://script.google.com/macros/s/AKfycbwLikFW-iT1bt4YhNzsNCgWFT-x6YzaCL1x4MhSmYKc7plaKd1Y5Bri-0ixbUlTBKSTLw/exec";
+const GAS_URL = "https://script.google.com/macros/s/AKfycbzGA7xQ5jEOIVB3PCOGE07AcA95soViCjxbiWirrdxOug0hRg5mVEd67Z9daH0AOUAdoA/exec";
 
 export function formattaDataRugby(val) {
     if (!val || val === "" || val === "null" || val === undefined) return "-";
-    
+
     const d = new Date(val);
     if (isNaN(d.getTime())) return val;
 
     const day = ("0" + d.getDate()).slice(-2);
     const month = ("0" + (d.getMonth() + 1)).slice(-2);
     const year = d.getFullYear();
-    
+
     if (year === 1899 || year === 1900) return "Mancante";
     return `${day}/${month}/${year}`;
 }
@@ -19,8 +19,8 @@ export const safeSet = (id, text) => {
     if (el) el.innerText = text;
 };
 
-export function formatEuro(v) { 
-    return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(v || 0); 
+export function formatEuro(v) {
+    return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(v || 0);
 }
 
 /**
@@ -32,18 +32,18 @@ export async function callGAS(action, params = {}) {
 
         const response = await fetch(GAS_URL, {
             method: 'POST',
-            mode: 'cors', 
+            mode: 'cors',
             body: JSON.stringify({ action, params })
         });
 
         if (!response.ok) throw new Error("Errore di rete verso Apps Script");
 
         const res = await response.json();
-        
+
         if (res.success === false) {
             throw new Error(res.error || "Errore lato GAS");
         }
-        
+
         return res.data;
     } catch (e) {
         console.error(`❌ Errore Bridge GAS [${action}]:`, e);
@@ -58,9 +58,9 @@ export async function callGAS(action, params = {}) {
  */
 export function mapArraysToObjects(payload) {
     if (!payload || !payload.headers || !payload.data) return [];
-    
+
     // Pulizia testate identica alla migrazione: spazi -> underscore, rimuovi speciali
-    const cleanHeaders = payload.headers.map(h => 
+    const cleanHeaders = payload.headers.map(h =>
         h.toString().trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '')
     );
 
@@ -78,7 +78,7 @@ export function mapArraysToObjects(payload) {
  */
 export function resolveUrlParams(url, data = {}) {
     if (!url) return "";
-    
+
     let resolvedUrl = url;
     const replacements = {
         "<EMAIL>": encodeURIComponent(data.email || ""),

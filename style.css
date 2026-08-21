@@ -417,3 +417,74 @@ body {
   border-radius: 12px;
   padding: 0 15px;
 }
+
+/* --- STILE PER MULTI-LISTA (CHECKLIST) --- */
+.multi-list-container {
+  background-color: #fff;
+  border: 1px solid var(--border-grey);
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 140px;
+  overflow-y: auto;
+  width: 100%;
+}
+
+.multi-list-item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.multi-list-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin-right: 10px;
+  cursor: pointer;
+}
+
+.multi-list-item label {
+  font-size: 0.75rem;
+  cursor: pointer;
+  margin-bottom: 0;
+}
+
+.multi-list-item input {
+  width: 15px;
+  height: 15px;
+  margin-right: 10px;
+  cursor: pointer;
+}
+
+/* Evidenzia il bordo se il campo è obbligatorio e vuoto */
+.multi-list-container.is-invalid {
+  border: 2px solid #dc3545 !important;
+  background-color: #fff8f8;
+}
+
+/* Anteprima Documenti Rettangolare (Proporzione Tessera) */
+.img-doc-preview {
+  width: 90px !important;
+  /* Larghezza aumentata */
+  height: 55px !important;
+  /* Altezza proporzionata */
+  border-radius: 6px;
+  object-fit: contain;
+  /* Fondamentale: non taglia i bordi del documento */
+  background-color: #f8f9fa;
+  /* Sfondo grigio chiaro per le parti vuote */
+  border: 1px solid #dee2e6;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.img-doc-preview:hover {
+  border-color: var(--brand) !important;
+  transform: scale(1.05);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Bordo rosso se obbligatorio e mancante */
+.img-doc-preview.img-invalid {
+  border: 2px solid #dc3545 !important;
+  background-color: #fff8f8 !important;
+}

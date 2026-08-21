@@ -87,7 +87,7 @@ onAuthStateChanged(auth, async (user) => {
             if (errorDiv) errorDiv.innerText = "";
 
             try {
-                const { initPortal } = await import('./portal.js?v=2.2.0');
+                const { initPortal } = await import('./portal.js?v=35.0.0');
                 await initPortal(user);
 
                 console.log("✅ Moduli Portale e Shop caricati correttamente.");

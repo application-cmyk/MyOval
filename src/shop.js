@@ -549,11 +549,19 @@ window.handleMemberToggle = function (checkbox, idContatto) {
                     // Gestione Override Squadre (Articolo:Lista_Squadre)
                     const overrides = {};
                     configCampi.forEach(conf => {
-                        if (typeof conf.opzioni === "string" && conf.opzioni.startsWith("Articolo:")) {
-                            const colonnaArt = conf.opzioni.split(":")[1];
-                            const valoreGrezzo = art[colonnaArt] || art[colonnaArt.replace(/_/g, " ")] || "";
-                            if (valoreGrezzo) {
-                                overrides[conf.id] = valoreGrezzo.split(',').map(s => s.trim()).filter(Boolean);
+                        const opzioniGrezze = conf.opzioni;
+
+                        if (typeof opzioniGrezze === "string" && opzioniGrezze.toUpperCase().startsWith("ARTICOLO:")) {
+                            const colonnaArt = opzioniGrezze.split(":")[1];
+                            const valoreArt = art[colonnaArt] || art[colonnaArt.replace(/_/g, " ")] || "";
+
+                            console.log(`📡 Risoluzione Override per ${conf.id}: Cerco in colonna [${colonnaArt}], Trovato: "${valoreArt}"`);
+
+                            if (valoreArt) {
+                                overrides[conf.id] = valoreArt.split(',').map(s => s.trim()).filter(Boolean);
+                                console.log(`✅ Opzioni finali per ${conf.id}:`, overrides[conf.id]);
+                            } else {
+                                console.warn(`⚠️ Colonna [${colonnaArt}] vuota o non trovata nell'articolo.`);
                             }
                         }
                     });
@@ -722,6 +730,18 @@ window.addToCart = async function () {
             console.log(`📤 Salvataggio dati tecnici per ${idC}...`, updatePayload);
             const saveRes = await callGAS("salvaDatiMembro", { payload: updatePayload });
             if (!saveRes.success) console.warn("Salvataggio anagrafica parziale o fallito lato server.");
+
+            // Già aggiorniamo la memoria locale (memberRef), ora aggiorniamo la valigia fisica
+            sessionStorage.setItem('myoval_shared_data', JSON.stringify(window.globalData));
+            console.log("🔄 Dati anagrafici sincronizzati dallo Shop alla Sessione");
+
+            // Aggiorniamo l'oggetto in memoria (RAM)
+            if (memberRef) Object.assign(memberRef, updatePayload);
+
+            // AGGIORNIAMO LA VALIGIA (SessionStorage)
+            sessionStorage.setItem('myoval_shared_data', JSON.stringify(window.globalData));
+
+            console.log("✅ Cache aggiornata con i dati inseriti nello Shop.");
 
             // B. AGGIORNA MEMORIA LOCALE (per coerenza dashboard)
             if (memberRef) {

@@ -1,167 +1,161 @@
+/**
+ * Inizializzazione Portale con Error Handling avanzato
+ */
 import { db } from "./firebase-config.js";
 import { doc, getDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { buildFamilyUI, selectMember } from "./anagrafica.js";
 import { callGAS, mapArraysToObjects, formattaDataRugby } from "./utils.js";
 
 /**
- * Inizializzazione Portale con Error Handling avanzato
+ * Inizializzazione Portale con gestione Cache e risoluzione ID Famiglia
  */
 export async function initPortal(user) {
     const loading = document.getElementById('loading-overlay');
     const errorContainer = document.getElementById('global-error-container');
+    const email = user.email.toLowerCase().trim();
 
-    if (loading) loading.style.display = 'flex';
-    if (errorContainer) errorContainer.classList.add('d-none'); // Reset errori precedenti
+    if (errorContainer) errorContainer.classList.add('d-none');
 
     try {
-        const email = user.email.toLowerCase().trim();
-        const username = email.split('@')[0];
-        const isNumeric = /^\d+$/.test(username);
-        const isInternal = email.endsWith("@rugbymilano.it");
+        // --- 1. CONTROLLO CACHE SESSIONE ---
+        const rawCache = sessionStorage.getItem('myoval_shared_data');
+        let dataFromCache = null;
 
-        // --- 1. DETERMINAZIONE GRUPPO OPERATIVO (Chi opera) ---
-        let userGroup = "ASSOCIATO";
-        try {
-            if (isInternal && !isNumeric) {
-                const roleSnap = await getDoc(doc(db, "staff_roles", email));
-                if (roleSnap.exists()) {
-                    userGroup = (roleSnap.data().Gruppo || roleSnap.data().Ruolo || "STAFF").trim();
-                } else {
-                    userGroup = "STAFF";
+        if (rawCache) {
+            try {
+                const parsed = JSON.parse(rawCache);
+                if (parsed.userEmail === email) {
+                    dataFromCache = parsed;
+                    console.log("%c 🚀 DATA RECOVERY: Cache trovata. ", "background: #1a2b3c; color: #00ff00; font-weight: bold;");
                 }
-            }
-        } catch (e) {
-            console.warn("⚠️ Impossibile leggere staff_roles, procedo come ASSOCIATO:", e);
+            } catch (e) { console.warn("Cache corrotta"); }
         }
 
-        // --- 2. DETERMINAZIONE STRADA DI ACCESSO E ID INIZIALE ---
-        let gasAction = "";
-        let gasParams = {};
-        let idFamigliaIniziale = null;
-
-        if (isInternal && isNumeric) {
-            // Caso Utente Club: andiamo diretti su GAS col FIRCode
-            gasAction = "GetDatiFamigliaAnagTesseratiFC";
-            gasParams = { firCode: username.toString() };
+        if (dataFromCache) {
+            window.globalData = dataFromCache;
         }
         else {
-            // Caso Utente Esterno: cerchiamo l'account registrato in Firestore
-            const accountSnap = await getDoc(doc(db, "accounts", email));
-            if (!accountSnap.exists()) {
-                // Funzione definita nel file portal.js
-                return avviaOnboardingSequence(email, loading);
+            // --- 2. SINCRONIZZAZIONE LENTA (Nessuna Cache) ---
+            if (loading) loading.style.setProperty('display', 'flex', 'important');
+
+            const username = email.split('@')[0];
+            const isNumeric = /^\d+$/.test(username);
+            const isInternal = email.endsWith("@rugbymilano.it");
+
+            // A. Recupero Gruppo
+            let userGroup = "ASSOCIATO";
+            const roleSnap = await getDoc(doc(db, "staff_roles", email));
+            if (roleSnap.exists()) {
+                userGroup = (roleSnap.data().Gruppo || roleSnap.data().Ruolo || "STAFF").trim();
             }
-            const accountData = accountSnap.data();
-            idFamigliaIniziale = accountData.ID_Famiglia || accountData.id_famiglia;
-            gasAction = "GetDatiFamigliaAnagTesseratiIDFam";
-            gasParams = { idFamiglia: idFamigliaIniziale ? idFamigliaIniziale.toString() : "" };
-        }
 
-        // --- 3. CARICAMENTO DATI PARALLELO (GAS + FIRESTORE) ---
-        console.log(`📡 Esecuzione Bridge: ${gasAction}...`);
+            // B. Determinazione ID e Azione GAS
+            let gasAction = "";
+            let gasParams = {};
+            let idFamigliaIniziale = null;
 
-        let rawRes, uiConfig, servizi;
+            if (isInternal && isNumeric) {
+                gasAction = "GetDatiFamigliaAnagTesseratiFC";
+                gasParams = { firCode: username.toString() };
+                idFamigliaIniziale = username;
+            } else {
+                const accountSnap = await getDoc(doc(db, "accounts", email));
+                if (!accountSnap.exists()) return avviaOnboardingSequence(email, loading);
+                const accountData = accountSnap.data();
+                idFamigliaIniziale = accountData.ID_Famiglia || accountData.id_famiglia;
+                gasAction = "GetDatiFamigliaAnagTesseratiIDFam";
+                gasParams = { idFamiglia: idFamigliaIniziale ? idFamigliaIniziale.toString() : "" };
+            }
 
-        try {
-            [rawRes, uiConfig, servizi] = await Promise.all([
+            // C. Esecuzione Chiamate
+            console.log(`📡 Chiamata Bridge: ${gasAction}...`);
+            const [rawRes, uiConfig, servizi, shopData] = await Promise.all([
                 callGAS(gasAction, gasParams),
                 getUIConfigByGroup(userGroup),
-                getServiziOnlineByGroup(userGroup)
+                getServiziOnlineByGroup(userGroup),
+                callGAS("getShopPortalDataWithCart", { email, idFamiglia: (idFamigliaIniziale || "0").toString(), membri: [] })
             ]);
-        } catch (dataErr) {
-            console.error("🔥 Errore durante il caricamento dati:", dataErr);
-            throw new Error("Errore di connessione al database. Ricarica la pagina.");
+
+            if (!rawRes || !rawRes.famiglia) throw new Error("Dati non ricevuti dal server Google.");
+
+            // D. Mapping
+            const famigliaOggetti = mapArraysToObjects(rawRes.famiglia);
+            const creaMappa = (arr) => {
+                const m = {};
+                arr.forEach(o => {
+                    const id = (o.IDContatto || o.ID_Contatto || "").toString().toLowerCase().trim();
+                    if (id) m[id] = o;
+                });
+                return m;
+            };
+
+            const idDaGAS = rawRes.debug?.codFam || rawRes.idFamiglia || rawRes.ID_Famiglia;
+            const idDaData = (famigliaOggetti.length > 0) ? famigliaOggetti[0].ID_Famiglia : null;
+            const idFamigliaFinale = idFamigliaIniziale || idDaGAS || idDaData || "N/D";
+
+            window.globalData = {
+                userEmail: email,
+                userGroup: userGroup,
+                idFamiglia: idFamigliaFinale,
+                famiglia: { data: famigliaOggetti },
+                atleti: creaMappa(mapArraysToObjects(rawRes.atleti)),
+                taglieKit: creaMappa(mapArraysToObjects(rawRes.taglie)),
+                privacyData: creaMappa(mapArraysToObjects(rawRes.privacy)),
+                codici: mapArraysToObjects(rawRes.codici),
+                config: uiConfig,
+                funzioni: servizi,
+                articoli: shopData.articoli || shopData.data?.articoli || [],
+                currentProfile: "ASSOCIATO",
+                selectedMemberIndex: 0
+            };
+            // --- LOG DI VERIFICA CATALOGO ---
+            console.log("%c 📦 CATALOGO ARTICOLI CARICATO: " + window.globalData.articoli.length + " elementi", "background: #ffc107; color: #000; font-weight: bold;");
+            if (window.globalData.articoli.length > 0) {
+                console.log("Esempio primo articolo:", window.globalData.articoli[0]);
+            }
+
+            sessionStorage.setItem('myoval_shared_data', JSON.stringify(window.globalData));
+            console.log("✅ Dati sincronizzati e salvati in cache.");
         }
 
-        if (!rawRes || !rawRes.famiglia) throw new Error("Dati famiglia non ricevuti dal server Google.");
+        // --- 3. AGGIORNAMENTO INTERFACCIA ---
+        if (loading) loading.style.setProperty('display', 'none', 'important');
 
-        // --- 4. MAPPING DATI ---
-        const famigliaOggetti = mapArraysToObjects(rawRes.famiglia);
-
-        const creaMappaPerID = (arrayOggetti) => {
-            const mappa = {};
-            arrayOggetti.forEach(obj => {
-                const idC = (obj.IDContatto || obj.ID_Contatto || "").toString().toLowerCase().trim();
-                if (idC) mappa[idC] = obj;
-            });
-            return mappa;
-        };
-
-        const atletiMap = creaMappaPerID(mapArraysToObjects(rawRes.atleti));
-        const taglieMap = creaMappaPerID(mapArraysToObjects(rawRes.taglie));
-        const privacyMap = creaMappaPerID(mapArraysToObjects(rawRes.privacy));
-        const codiciOggetti = mapArraysToObjects(rawRes.codici);
-
-        // --- 5. RICERCA AGGRESSIVA ID FAMIGLIA ---
-        const idDaGAS = rawRes.debug?.codFam || rawRes.idFamiglia || rawRes.ID_Famiglia;
-        const idDaData = (famigliaOggetti.length > 0) ? famigliaOggetti[0].ID_Famiglia : null;
-        const idFamigliaFinale = idFamigliaIniziale || idDaGAS || idDaData || "N/D";
-
-        // --- 6. SALVATAGGIO IN MEMORIA GLOBALE ---
-        window.globalData = {
-            userEmail: email,
-            userGroup: userGroup,
-            idFamiglia: idFamigliaFinale,
-            famiglia: { data: famigliaOggetti },
-            atleti: atletiMap,
-            taglieKit: taglieMap,
-            privacyData: privacyMap,
-            codici: codiciOggetti,
-            config: uiConfig,
-            funzioni: servizi,
-            currentProfile: "ASSOCIATO"
-        };
-
-        // --- 7. AGGIORNAMENTO INTERFACCIA ---
-
-        // A. Scriviamo l'email nell'header
         const emailLabel = document.getElementById('user-email-display');
-        if (emailLabel) emailLabel.innerText = email;
+        if (emailLabel) emailLabel.innerText = window.globalData.userEmail;
 
-        // B. Scriviamo l'ID Famiglia nel sommario
         const idDisplay = document.getElementById('ui-display-id-famiglia');
-        if (idDisplay) idDisplay.innerText = `ID FAMIGLIA: ${idFamigliaFinale}`;
+        if (idDisplay) idDisplay.innerText = `ID FAMIGLIA: ${window.globalData.idFamiglia}`;
 
-        // C. Gestione Viste
         document.getElementById('onboarding-view')?.classList.add('d-none');
         document.getElementById('dashboard-view')?.classList.remove('d-none');
+        document.getElementById('dashboard-view').style.display = 'block';
 
-        // D. Generazione Bolle e Bottoni
-        buildFamilyUI(famigliaOggetti);
+        buildFamilyUI(window.globalData.famiglia.data);
 
-        const { buildFunzioniUI, validateAllMembers } = await import('./anagrafica.js');
-        buildFunzioniUI(servizi);
+        // Importazione dinamica per evitare conflitti
+        const { buildFunzioniUI, validateAllMembers } = await import('./anagrafica.js?v=35.0.1');
+        buildFunzioniUI(window.globalData.funzioni);
         validateAllMembers();
 
-        // Seleziona il primo membro
-        selectMember(0);
+        selectMember(window.globalData.selectedMemberIndex || 0);
 
     } catch (error) {
         console.error("❌ Errore Portale:", error);
-        if (typeof mostraErroreBloccante === "function") {
-            mostraErroreBloccante(error.message);
-        } else {
-            alert("Si è verificato un errore durante l'avvio: " + error.message);
-        }
-    } finally {
+        if (typeof mostraErroreBloccante === "function") mostraErroreBloccante(error.message);
         if (loading) loading.style.display = 'none';
     }
 }
 
+
 function mostraErroreBloccante(msg) {
-    const errorCont = document.getElementById('global-error-container');
-    const errorMsg = document.getElementById('global-error-msg');
-    const dashboard = document.getElementById('dashboard-view');
-
-    if (errorCont && errorMsg) {
-        errorMsg.innerText = msg;
-        errorCont.classList.remove('d-none');
-        if (dashboard) dashboard.classList.add('d-none');
-
-        // Scroll verso l'errore per essere sicuri che l'utente lo veda
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+    const errCont = document.getElementById('global-error-container');
+    const errMsg = document.getElementById('global-error-msg');
+    if (errCont && errMsg) {
+        errMsg.innerText = msg;
+        errCont.classList.remove('d-none');
     } else {
-        alert("ERRORE CRITICO: " + msg);
+        alert(msg);
     }
 }
 
@@ -188,45 +182,62 @@ function mostraErroreCritico(msg) {
  */
 async function getUIConfigByGroup(groupName) {
     try {
+        console.log(`📥 Caricamento regole UI per Gruppo: ${groupName}`);
+
+        const q = query(collection(db, "ui_config"), where("Gruppo", "==", groupName.toUpperCase()));
         const [configSnap, listeSnap] = await Promise.all([
-            getDocs(query(collection(db, "ui_config"), where("Gruppo", "==", groupName))),
+            getDocs(q),
             getDoc(doc(db, "settings", "liste_valori"))
         ]);
 
-        const dizionario = listeSnap.exists() ? listeSnap.data() : {};
-        const profili = { "ASSOCIATO": [], "ATLETA": [] };
+        const dizionarioGrezzo = listeSnap.exists() ? listeSnap.data() : {};
+        const dizionario = {};
+        Object.keys(dizionarioGrezzo).forEach(k => {
+            dizionario[k.toUpperCase().trim()] = dizionarioGrezzo[k];
+        });
+
+        const configPerProfilo = { "ASSOCIATO": [], "ATLETA": [] };
 
         configSnap.forEach(docSnap => {
             const f = docSnap.data();
             const pName = (f.Profilo || "ASSOCIATO").toUpperCase().trim();
-            if (!profili[pName]) profili[pName] = [];
+            if (!configPerProfilo[pName]) configPerProfilo[pName] = [];
 
-            // Gestione Liste
             let opzioni = [];
-            const rawOpt = f.Opzioni_Lista || f.Opzioni || "";
-            const tipoInput = (f.Tipo_Input || "").toLowerCase();
+            // Normalizziamo per il controllo logico ma teniamo l'originale per il log
+            const tipoInputOriginale = f.Tipo_Input || "";
+            const tipoInputLower = tipoInputOriginale.toLowerCase().trim();
 
-            if (tipoInput === "lista") {
-                if (rawOpt.toUpperCase().startsWith("LISTE:")) {
+            if (tipoInputLower === "lista" || tipoInputLower === "multi-lista") {
+                const rawOpt = f.Opzioni_Lista || f.Opzioni || "";
+                const rawUpper = rawOpt.toUpperCase().trim();
+
+                if (rawUpper.startsWith("LISTE:")) {
                     const key = rawOpt.split(":")[1].trim().toUpperCase();
                     opzioni = dizionario[key] || [];
-                }
-                // --- AGGIUNTA QUESTA CONDIZIONE ---
-                else if (rawOpt.toUpperCase().startsWith("ARTICOLO:")) {
-                    // Passiamo la stringa intera, la risolverà shop.js al momento del click
+                } else if (rawUpper.startsWith("ARTICOLO:")) {
+                    // Restituiamo la stringa per l'anagrafica.js (Scenario B)
                     opzioni = rawOpt;
-                }
-                else if (rawOpt) {
+                } else if (rawOpt) {
                     opzioni = rawOpt.split(',').map(s => s.trim());
+                }
+
+                // --- LOG DI TRACCIAMENTO SPECIFICO PER MULTI-LISTA ---
+                if (tipoInputLower === "multi-lista") {
+                    console.group(`✨ Tracciamento Campo Multi-Lista: ${f.ID_Campo}`);
+                    console.log("Valore originale in DB:", tipoInputOriginale);
+                    console.log("Configurazione Opzioni:", rawOpt);
+                    console.log("Risultato Opzioni processate:", opzioni);
+                    console.groupEnd();
                 }
             }
 
-            profili[pName].push({
+            configPerProfilo[pName].push({
                 id: f.ID_Campo,
                 label: f.Etichetta || f.ID_Campo,
                 sezione: f.Sezione || "Generale",
-                larghezza: parseInt(f.Larghezza_3__4__6_12 || 4),
-                tipoInput: (f.Tipo_Input || "testo").toLowerCase(),
+                larghezza: parseInt(f.Larghezza_3__4__6_12 || f.Larghezza || 4),
+                tipoInput: tipoInputLower, // Usiamo il lower per coerenza nel rendering
                 required: f.Obbligatorio === true,
                 readonly: f.Readonly === true,
                 visibile: f.Visibile === true,
@@ -236,9 +247,14 @@ async function getUIConfigByGroup(groupName) {
             });
         });
 
-        Object.keys(profili).forEach(p => profili[p].sort((a, b) => a.ordine - b.ordine));
-        return profili;
-    } catch (e) { console.error(e); return {}; }
+        Object.keys(configPerProfilo).forEach(p => configPerProfilo[p].sort((a, b) => a.ordine - b.ordine));
+
+        console.log("✅ Configurazione caricata. Profili pronti:", Object.keys(configPerProfilo));
+        return configPerProfilo;
+    } catch (e) {
+        console.error("❌ Errore in getUIConfigByGroup:", e);
+        return {};
+    }
 }
 
 
@@ -307,17 +323,31 @@ async function getUIConfig() {
  * Helper per generare l'array delle opzioni per le select
  */
 function generaOpzioni(f, dizionario) {
-    let opzioni = [];
-    const rawOpt = f.Opzioni_Lista || f.Opzioni || "";
-    if (f.Tipo_Input && f.Tipo_Input.toLowerCase() === "lista") {
-        if (rawOpt.toUpperCase().startsWith("LISTE:")) {
+    // Cerchiamo il valore della colonna opzioni (tollerante ai nomi)
+    const rawOpt = (f.Opzioni_Lista || f.Opzioni || f.opzioni || "").toString().trim();
+    const tipo = (f.Tipo_Input || f.TipoInput || "").toLowerCase().trim();
+
+    if (tipo === "lista" || tipo === "multi-lista") {
+        const rawUpper = rawOpt.toUpperCase();
+
+        // CASO 1: Riferimento al dizionario (es. LISTE:Sesso)
+        if (rawUpper.startsWith("LISTE:")) {
             const key = rawOpt.split(":")[1].trim().toUpperCase();
-            opzioni = dizionario[key] || [];
-        } else {
-            opzioni = rawOpt ? rawOpt.split(',').map(s => s.trim()) : [];
+            return dizionario[key] || [];
+        }
+
+        // CASO 2: Riferimento DINAMICO all'articolo (es. ARTICOLO:Lista_Squadre)
+        // FONDAMENTALE: Restituiamo la STRINGA così com'è per attivarla in anagrafica.js
+        if (rawUpper.startsWith("ARTICOLO:")) {
+            return rawOpt;
+        }
+
+        // CASO 3: Lista fissa testuale (es. "Sì, No")
+        if (rawOpt !== "") {
+            return rawOpt.split(',').map(s => s.trim());
         }
     }
-    return opzioni;
+    return [];
 }
 
 /**
@@ -341,61 +371,66 @@ export function buildFunzioni(lista) {
  */
 async function getServiziOnlineByGroup(groupName) {
     try {
-        console.log(`📥 Caricamento Servizi Ordinati per: ${groupName}`);
+        const gName = groupName.toUpperCase().trim();
+        console.log(`%c 🛰️ INIZIO RECUPERO SERVIZI PER: ${gName} `, "background: #1a2b3c; color: #fff; font-weight: bold;");
 
-        // 1. Recupero le abilitazioni con l'ordine specifico per questo gruppo
-        const q = query(collection(db, "config_access"), where("Gruppo", "==", groupName.toUpperCase()));
-        const accessSnap = await getDocs(q);
+        // 1. Recupero regole di accesso dal database
+        const qAccess = query(collection(db, "config_access"), where("Gruppo", "in", [gName, "ALL"]));
+        const accessSnap = await getDocs(qAccess);
 
-
-        const mappingAccesso = {}; // Funzione -> Ordine
-        accessSnap.forEach(doc => {
-            const d = doc.data();
-            const nomeFunz = (d.Funzione || d.Funzionalit || "").toLowerCase().trim();
-            if (nomeFunz) {
-                mappingAccesso[nomeFunz] = parseInt(d.Ordine) || 999;
+        const mappingAccesso = {};
+        accessSnap.forEach(docSnap => {
+            const d = docSnap.data();
+            // Cerchiamo il nome funzione (tollerante a Funzione/Funzionalit)
+            const fKey = (d.Funzione || d.Funzionalit || "").toLowerCase().trim();
+            if (fKey) {
+                // Forziamo il valore a Numero
+                const valOrdine = parseInt(d.Ordine);
+                mappingAccesso[fKey] = isNaN(valOrdine) ? 99 : valOrdine;
+                console.log(`📍 Da Spreadsheet Accessi -> Funzione: "${fKey}" | Ordine: ${mappingAccesso[fKey]}`);
             }
         });
 
-        if (Object.keys(mappingAccesso).length === 0) return [];
-
-        // 2. Recupero i dettagli tecnici (features)
+        // 2. Recupero dettagli tecnici (features)
         const featuresSnap = await getDocs(collection(db, "features"));
         const listaFinal = [];
 
-        featuresSnap.forEach(doc => {
-            const data = doc.data();
-            const idFeature = doc.id.toLowerCase().trim();
+        featuresSnap.forEach(docSnap => {
+            const fId = docSnap.id.toLowerCase().trim();
 
-            if (mappingAccesso[idFeature] !== undefined) {
+            if (mappingAccesso[fId] !== undefined) {
+                const d = docSnap.data();
                 listaFinal.push({
-                    nome: data.Nome || doc.id,
-                    link: data.Link_o_Mode || data.Link || "",
-                    tipo: (data.Tipo || "IFRAME").toUpperCase(),
-                    target: data.Target || "_self",
-                    sottotitolo: data.Sottotitolo_Help_Text || "",
-                    // PRENDIAMO L'ORDINE DALLA TABELLA ACCESSI
-                    ordinePresentazione: mappingAccesso[idFeature]
+                    nome: d.Nome || docSnap.id,
+                    link: d.Link_o_Mode || d.Link || "",
+                    tipo: (d.Tipo || "IFRAME").toUpperCase(),
+                    // Assegniamo l'ordine numerico trovato prima
+                    ordine: mappingAccesso[fId]
                 });
             }
         });
 
-        // 3. ORDINAMENTO FINALE basato sulla tabella config_access
-        listaFinal.sort((a, b) => a.ordinePresentazione - b.ordinePresentazione);
+        // --- IL LOG CRITICO ---
+        console.log("📦 Lista PRIMA del sort:", listaFinal.map(f => `${f.ordine}: ${f.nome}`));
+
+        // 3. ORDINAMENTO NUMERICO
+        listaFinal.sort((a, b) => a.ordine - b.ordine);
+
+        console.log("%c ✅ LISTA DOPO IL SORT (Ordine finale): ", "color: #28a745; font-weight: bold;", listaFinal.map(f => `${f.ordine}: ${f.nome}`));
 
         return listaFinal;
+
     } catch (e) {
         console.error("❌ Errore in getServiziOnlineByGroup:", e);
         return [];
     }
 }
 
-// Funzione helper per l'onboarding
 async function avviaOnboardingSequence(email, loading) {
-    document.getElementById('dashboard-view').classList.add('d-none');
-    document.getElementById('onboarding-view').classList.remove('d-none');
+    document.getElementById('dashboard-view')?.classList.add('d-none');
+    document.getElementById('onboarding-view')?.classList.remove('d-none');
     window.globalData = { userEmail: email, config: await getUIConfigByGroup("ASSOCIATO") };
-    const { WIZ_init } = await import('./onboarding.js');
+    const { WIZ_init } = await import('./onboarding.js?v=35.0.1');
     WIZ_init();
     if (loading) loading.style.display = 'none';
 }
