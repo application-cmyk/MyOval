@@ -343,39 +343,62 @@ function generaInputHtml(conf, valore, errorClass = "", memberData = {}, options
     const rq = conf.required ? "required" : "";
     const v = (valore === null || valore === undefined) ? "" : valore;
 
+    // 1. Inizializziamo le opzioni dal campo config
     let options = Array.isArray(conf.opzioni) ? conf.opzioni : [];
 
     // --- LOGICA DINAMICA ARTICOLO (Puntatore Articolo:...) ---
     if (typeof conf.opzioni === "string" && conf.opzioni.toUpperCase().startsWith("ARTICOLO:")) {
-        const targetCol = conf.opzioni.split(":")[1];
 
-        // ESTRAZIONE PARAMETRI (Usiamo getValue per massima sicurezza)
-        const areaAtl = (getValue(memberData, "Area")).toUpperCase().trim();
-        const catAtl = (getValue(memberData, "Categoria_Fed") || getValue(memberData, "Categoria")).toUpperCase().trim();
-        const tipoAtl = (getValue(memberData, "Tipo")).toUpperCase().trim();
+        // CASO A: Siamo nello SHOP (abbiamo un override esplicito)
+        if (optionsOverride && optionsOverride[conf.id]) {
+            options = optionsOverride[conf.id];
+            console.log(`✅ [${conf.id}] Opzioni caricate da override Shop.`);
+        }
+        // CASO B: Siamo nella DASHBOARD (applichiamo la tua logica di ricerca)
+        else {
+            const targetCol = conf.opzioni.split(":")[1]; // es: "Lista_Squadre"
 
-        const article = (window.globalData.articoli || []).find(a =>
-            (a.Tipo_Articolo === "TESSERAMENTO") &&
-            (a.Area || "").toUpperCase().trim() === areaAtl &&
-            (a.Categoria_Federale || a.Categoria_Fed || "").toUpperCase().trim() === catAtl &&
-            (a.Tipo_Tesseramento || a.Tipo || "").toUpperCase().trim() === tipoAtl
-        );
+            // --- TUA LOGICA DI RICERCA INTEGRATA ---
+            const areaAtl = (getValue(memberData, "Area")).toUpperCase().trim();
+            const catAtl = (getValue(memberData, "Categoria_Fed") || getValue(memberData, "Categoria")).toUpperCase().trim();
+            const tipoAtl = (getValue(memberData, "Tipo")).toUpperCase().trim();
 
-        if (article && article[targetCol]) {
-            options = article[targetCol].split(',').map(s => s.trim()).filter(Boolean);
-            console.log(`🎯 [${conf.id}] Squadre caricate dall'articolo: ${article.Nome_Articolo}`);
+            const article = (window.globalData.articoli || []).find(a =>
+                (a.Tipo_Articolo === "TESSERAMENTO") &&
+                (a.Area || "").toUpperCase().trim() === areaAtl &&
+                (a.Categoria_Federale || a.Categoria_Fed || "").toUpperCase().trim() === catAtl &&
+                (a.Tipo_Tesseramento || a.Tipo || "").toUpperCase().trim() === tipoAtl
+            );
+
+            if (article && article[targetCol]) {
+                options = article[targetCol].split(',').map(s => s.trim()).filter(Boolean);
+                console.log(`🎯 [${conf.id}] Match riuscito: caricate squadre dall'articolo ${article.Nome_Articolo}`);
+            } else {
+                console.warn(`⚠️ Nessun articolo trovato per il match: Area:${areaAtl}, Cat:${catAtl}, Tipo:${tipoAtl}`);
+                options = []; // Se non c'è match, la lista deve essere vuota, non "tutte le squadre"
+            }
         }
     }
 
+    // --- RENDERING HTML ---
     switch (tipo) {
         case "multi-lista":
             const currentSelected = v.toString().toLowerCase().split(',').map(s => s.trim());
             let multiHtml = `<div class="multi-list-container ${errorClass}" data-id="${conf.id}" style="border: 1px solid #ced4da; padding: 10px; border-radius: 8px; background: #fff; max-height: 150px; overflow-y: auto;">`;
-            if (options.length === 0) multiHtml += `<div class="small text-muted italic p-1">Nessuna opzione trovata</div>`;
+
+            if (options.length === 0) {
+                multiHtml += `<div class="small text-muted italic p-1">Nessuna opzione disponibile per la categoria.</div>`;
+            }
+
             options.forEach((o, idx) => {
                 const optStr = o.toString().trim();
                 const isChecked = (options.length === 1 || currentSelected.includes(optStr.toLowerCase())) ? "checked" : "";
-                multiHtml += `<div class="d-flex align-items-center mb-1"><input type="checkbox" class="multi-check-part me-2" id="chk_${conf.id}_${idx}" value="${optStr}" ${isChecked} ${conf.readonly ? 'disabled' : ''} style="width:16px;height:16px;"><label class="small mb-0" for="chk_${conf.id}_${idx}" style="cursor:pointer;flex-grow:1;">${optStr}</label></div>`;
+
+                multiHtml += `
+                    <div class="d-flex align-items-center mb-1">
+                        <input type="checkbox" class="multi-check-part me-2" id="chk_${conf.id}_${idx}" value="${optStr}" ${isChecked} ${conf.readonly ? 'disabled' : ''} style="width:16px; height:16px;">
+                        <label class="small mb-0" for="chk_${conf.id}_${idx}" style="cursor:pointer; flex-grow: 1;">${optStr}</label>
+                    </div>`;
             });
             return multiHtml + `</div><input type="hidden" class="val-field" data-id="${conf.id}" id="val_${conf.id}" value="${v}" ${rq}>`;
 
@@ -527,11 +550,22 @@ window.handleFileUpload = async function (input, fieldId, label) {
 /**
 * 8. SALVATAGGIO SCHEDA (Via GAS Bridge)
 */
+
 window.salvaSchedaAttiva = async function () {
-    // 1. Recupero riferimenti e pulsante
+    // 1. Recupero riferimenti e membro attuale
     const index = window.currentMemberIndex;
     const member = window.globalData.famiglia.data[index];
+    const idFam = window.globalData.idFamiglia;
+
     if (!member) return alert("Errore: nessun membro selezionato.");
+
+    // --- PROTEZIONE DI SICUREZZA ID FAMIGLIA ---
+    // Se l'ID Famiglia è uguale all'ID Contatto (e lungo come un FIR), blocchiamo per evitare danni allo Spreadsheet
+    if (idFam && idFam.length > 5 && idFam === member.IDContatto) {
+        console.error("❌ Blocco sicurezza: ID Famiglia corrotto rilevato (corrisponde al FIR).");
+        alert("⚠️ Si è verificato un problema con l'ID Famiglia. Per sicurezza il salvataggio è sospeso. Ricarica la pagina (F5).");
+        return;
+    }
 
     const btn = document.querySelector('button[onclick="salvaSchedaAttiva()"]');
     const originalText = btn ? btn.innerHTML : "SALVA MODIFICHE";
@@ -545,55 +579,60 @@ window.salvaSchedaAttiva = async function () {
 
         // 3. RACCOLTA DATI DAI CAMPI .val-field
         const fields = document.querySelectorAll('.val-field');
+
+        // Prepariamo il payload per GAS
         const updateData = {
             idContatto: member.IDContatto,
-            ID_Famiglia: window.globalData.idFamiglia // Passiamo l'ID famiglia per nuove righe su GAS
+            ID_Famiglia: idFam // Necessario per creare righe mancanti in Taglie/Privacy
         };
+
+        const idCLow = member.IDContatto.toString().toLowerCase().trim();
 
         fields.forEach(f => {
             const id = f.getAttribute('data-id');
             if (!id) return;
 
-            // Legge il valore in base al tipo di input
+            // Leggiamo il valore corretto (booleano per checkbox, testo per gli altri)
             const val = f.type === 'checkbox' ? f.checked : f.value;
 
-            // Popola il pacchetto per il server
+            // Popoliamo il pacchetto per il server
             updateData[id] = val;
 
-            // --- AGGIORNAMENTO MEMORIA LOCALE (Sincronizzazione immediata) ---
-            // Aggiorna l'oggetto anagrafica principale
+            // --- AGGIORNAMENTO MEMORIA LOCALE (Sincronizzazione Totale) ---
+            // 1. Aggiorna l'oggetto nella lista famiglia
             member[id] = val;
 
-            // Aggiorna anche le mappe tecniche se il campo appartiene a quelle sezioni
-            const idCLow = member.IDContatto.toString().toLowerCase().trim();
+            // 2. Aggiorna i "cassetti" tecnici se il campo appartiene a quelli
             if (window.globalData.atleti[idCLow]) window.globalData.atleti[idCLow][id] = val;
             if (window.globalData.taglieKit[idCLow]) window.globalData.taglieKit[idCLow][id] = val;
             if (window.globalData.privacyData[idCLow]) window.globalData.privacyData[idCLow][id] = val;
         });
 
-        console.log("📤 Invio aggiornamento a GAS:", updateData);
+        console.log(`📤 Invio aggiornamento a GAS per ${member.Nome}:`, updateData);
 
         // 4. CHIAMATA AL PONTE GAS
         const res = await callGAS("salvaDatiMembro", { payload: updateData });
 
         if (res && res.success) {
             // --- 5. AGGIORNAMENTO CACHE DI SESSIONE (La valigia) ---
-            // Fondamentale: salviamo lo stato aggiornato nel sessionStorage
-            // così se l'utente va nello Shop o ricarica, trova i dati nuovi.
+            // Salviamo lo stato globale aggiornato nel sessionStorage
+            // Questo garantisce che tornando dallo Shop o ricaricando, i dati siano già pronti
             sessionStorage.setItem('myoval_shared_data', JSON.stringify(window.globalData));
 
-            // 6. RE-VALIDAZIONE BOLLA
-            // Ricalcola se la bolla deve essere VERDE o ROSSA
-            checkMemberValidation(index);
+            // 6. RE-VALIDAZIONE UI
+            // Ricalcola se la bolla deve essere VERDE o ROSSA dopo le modifiche
+            if (typeof checkMemberValidation === "function") {
+                checkMemberValidation(index);
+            }
 
             alert("✅ Dati salvati con successo nello Spreadsheet!");
         } else {
-            throw new Error(res ? res.error : "Errore sconosciuto lato server");
+            throw new Error(res ? res.error : "Il server Google non ha risposto correttamente.");
         }
 
     } catch (error) {
         console.error("❌ Errore durante il salvataggio:", error);
-        alert("Si è verificato un errore nel salvataggio: " + error.message);
+        alert("⚠️ Errore durante il salvataggio: " + error.message);
     } finally {
         // 7. UI: Ripristino pulsante
         if (btn) {
@@ -602,7 +641,6 @@ window.salvaSchedaAttiva = async function () {
         }
     }
 };
-
 
 
 /**

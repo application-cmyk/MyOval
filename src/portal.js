@@ -17,134 +17,157 @@ export async function initPortal(user) {
     if (errorContainer) errorContainer.classList.add('d-none');
 
     try {
-        // --- 1. CONTROLLO CACHE SESSIONE ---
+        // --- 1. VERIFICA CACHE (Sessione già attiva) ---
         const rawCache = sessionStorage.getItem('myoval_shared_data');
-        let dataFromCache = null;
-
         if (rawCache) {
-            try {
-                const parsed = JSON.parse(rawCache);
-                if (parsed.userEmail === email) {
-                    dataFromCache = parsed;
-                    console.log("%c 🚀 DATA RECOVERY: Cache trovata. ", "background: #1a2b3c; color: #00ff00; font-weight: bold;");
-                }
-            } catch (e) { console.warn("Cache corrotta"); }
+            const parsed = JSON.parse(rawCache);
+            if (parsed.userEmail === email && parsed.idFamiglia && parsed.idFamiglia !== "N/D") {
+                window.globalData = parsed;
+                console.log("%c 🚀 CACHE DATA RECOVERY: Sessione valida. ", "color: #28a745; font-weight: bold;");
+                renderFinalUI(loading);
+                return;
+            }
         }
 
-        if (dataFromCache) {
-            window.globalData = dataFromCache;
-        }
-        else {
-            // --- 2. SINCRONIZZAZIONE LENTA (Nessuna Cache) ---
-            if (loading) loading.style.setProperty('display', 'flex', 'important');
-
-            const username = email.split('@')[0];
-            const isNumeric = /^\d+$/.test(username);
-            const isInternal = email.endsWith("@rugbymilano.it");
-
-            // A. Recupero Gruppo
-            let userGroup = "ASSOCIATO";
-            const roleSnap = await getDoc(doc(db, "staff_roles", email));
-            if (roleSnap.exists()) {
-                userGroup = (roleSnap.data().Gruppo || roleSnap.data().Ruolo || "STAFF").trim();
-            }
-
-            // B. Determinazione ID e Azione GAS
-            let gasAction = "";
-            let gasParams = {};
-            let idFamigliaIniziale = null;
-
-            if (isInternal && isNumeric) {
-                gasAction = "GetDatiFamigliaAnagTesseratiFC";
-                gasParams = { firCode: username.toString() };
-                idFamigliaIniziale = username;
-            } else {
-                const accountSnap = await getDoc(doc(db, "accounts", email));
-                if (!accountSnap.exists()) return avviaOnboardingSequence(email, loading);
-                const accountData = accountSnap.data();
-                idFamigliaIniziale = accountData.ID_Famiglia || accountData.id_famiglia;
-                gasAction = "GetDatiFamigliaAnagTesseratiIDFam";
-                gasParams = { idFamiglia: idFamigliaIniziale ? idFamigliaIniziale.toString() : "" };
-            }
-
-            // C. Esecuzione Chiamate
-            console.log(`📡 Chiamata Bridge: ${gasAction}...`);
-            const [rawRes, uiConfig, servizi, shopData] = await Promise.all([
-                callGAS(gasAction, gasParams),
-                getUIConfigByGroup(userGroup),
-                getServiziOnlineByGroup(userGroup),
-                callGAS("getShopPortalDataWithCart", { email, idFamiglia: (idFamigliaIniziale || "0").toString(), membri: [] })
-            ]);
-
-            if (!rawRes || !rawRes.famiglia) throw new Error("Dati non ricevuti dal server Google.");
-
-            // D. Mapping
-            const famigliaOggetti = mapArraysToObjects(rawRes.famiglia);
-            const creaMappa = (arr) => {
-                const m = {};
-                arr.forEach(o => {
-                    const id = (o.IDContatto || o.ID_Contatto || "").toString().toLowerCase().trim();
-                    if (id) m[id] = o;
-                });
-                return m;
-            };
-
-            const idDaGAS = rawRes.debug?.codFam || rawRes.idFamiglia || rawRes.ID_Famiglia;
-            const idDaData = (famigliaOggetti.length > 0) ? famigliaOggetti[0].ID_Famiglia : null;
-            const idFamigliaFinale = idFamigliaIniziale || idDaGAS || idDaData || "N/D";
-
-            window.globalData = {
-                userEmail: email,
-                userGroup: userGroup,
-                idFamiglia: idFamigliaFinale,
-                famiglia: { data: famigliaOggetti },
-                atleti: creaMappa(mapArraysToObjects(rawRes.atleti)),
-                taglieKit: creaMappa(mapArraysToObjects(rawRes.taglie)),
-                privacyData: creaMappa(mapArraysToObjects(rawRes.privacy)),
-                codici: mapArraysToObjects(rawRes.codici),
-                config: uiConfig,
-                funzioni: servizi,
-                articoli: shopData.articoli || shopData.data?.articoli || [],
-                currentProfile: "ASSOCIATO",
-                selectedMemberIndex: 0
-            };
-            // --- LOG DI VERIFICA CATALOGO ---
-            console.log("%c 📦 CATALOGO ARTICOLI CARICATO: " + window.globalData.articoli.length + " elementi", "background: #ffc107; color: #000; font-weight: bold;");
-            if (window.globalData.articoli.length > 0) {
-                console.log("Esempio primo articolo:", window.globalData.articoli[0]);
-            }
-
-            sessionStorage.setItem('myoval_shared_data', JSON.stringify(window.globalData));
-            console.log("✅ Dati sincronizzati e salvati in cache.");
+        // --- 2. CARICAMENTO DATI DAI SERVER ---
+        if (loading) {
+            loading.style.setProperty('display', 'flex', 'important');
+            const h5 = loading.querySelector('h5');
+            if (h5) h5.innerText = "Sincronizzazione dati...";
         }
 
-        // --- 3. AGGIORNAMENTO INTERFACCIA ---
-        if (loading) loading.style.setProperty('display', 'none', 'important');
+        const username = email.split('@')[0];
+        const isNumeric = /^\d+$/.test(username);
+        const isInternal = email.endsWith("@rugbymilano.it");
 
-        const emailLabel = document.getElementById('user-email-display');
-        if (emailLabel) emailLabel.innerText = window.globalData.userEmail;
+        // A. Determinazione Gruppo Operatore (Staff vs Socio)
+        let userGroup = "ASSOCIATO";
+        const roleSnap = await getDoc(doc(db, "staff_roles", email));
+        if (roleSnap.exists()) {
+            userGroup = (roleSnap.data().Gruppo || roleSnap.data().Ruolo || "STAFF").toUpperCase();
+        }
 
-        const idDisplay = document.getElementById('ui-display-id-famiglia');
-        if (idDisplay) idDisplay.innerText = `ID FAMIGLIA: ${window.globalData.idFamiglia}`;
+        // B. Determinazione Strada Accesso
+        let gasAction = "";
+        let gasParams = {};
+        let idFamigliaDaFirestore = null;
 
-        document.getElementById('onboarding-view')?.classList.add('d-none');
-        document.getElementById('dashboard-view')?.classList.remove('d-none');
-        document.getElementById('dashboard-view').style.display = 'block';
+        if (isInternal && isNumeric) {
+            gasAction = "GetDatiFamigliaAnagTesseratiFC";
+            gasParams = { firCode: username.toString() };
+        } else {
+            const accountSnap = await getDoc(doc(db, "accounts", email));
+            if (!accountSnap.exists()) {
+                // Avvio Wizard per nuovi utenti
+                return avviaOnboardingSequence(email, loading);
+            }
+            const accountData = accountSnap.data();
+            idFamigliaDaFirestore = accountData.ID_Famiglia || accountData.id_famiglia;
+            gasAction = "GetDatiFamigliaAnagTesseratiIDFam";
+            gasParams = { idFamiglia: idFamigliaDaFirestore ? idFamigliaDaFirestore.toString() : "" };
+        }
 
-        buildFamilyUI(window.globalData.famiglia.data);
+        // C. Chiamata Parallela Bridge GAS e Firestore
+        console.log(`📡 Chiamata Bridge: ${gasAction}...`);
+        const [rawRes, uiConfig, servizi, shopData] = await Promise.all([
+            callGAS(gasAction, gasParams),
+            getUIConfigByGroup(userGroup),
+            getServiziOnlineByGroup(userGroup),
+            callGAS("getShopPortalDataWithCart", { email, idFamiglia: idFamigliaDaFirestore || "0", membri: [] })
+        ]);
 
-        // Importazione dinamica per evitare conflitti
-        const { buildFunzioniUI, validateAllMembers } = await import('./anagrafica.js?v=35.0.1');
-        buildFunzioniUI(window.globalData.funzioni);
-        validateAllMembers();
+        if (!rawRes || !rawRes.famiglia) throw new Error("Dati non ricevuti dal server Google.");
 
-        selectMember(window.globalData.selectedMemberIndex || 0);
+        // D. Mapping Dati
+        const famigliaOggetti = mapArraysToObjects(rawRes.famiglia);
+
+        const creaMappa = (arr) => {
+            const m = {};
+            arr.forEach(o => {
+                const id = (o.IDContatto || o.ID_Contatto || "").toString().toLowerCase().trim();
+                if (id) m[id] = o;
+            });
+            return m;
+        };
+
+        // --- 3. LOGICA DI SICUREZZA ID FAMIGLIA (FIX CRITICO) ---
+        // Evitiamo che il FIR (username) venga salvato come ID Famiglia
+        let idFamigliaFinale = "N/D";
+
+        // Priorità 1: Valore certo da Firestore (per esterni)
+        if (idFamigliaDaFirestore) {
+            idFamigliaFinale = idFamigliaDaFirestore;
+        } else {
+            // Priorità 2: Valore dalla colonna ID_Famiglia del primo membro trovato
+            const idDalSocio = (famigliaOggetti.length > 0) ? famigliaOggetti[0].ID_Famiglia : null;
+            // Priorità 3: Valore dal campo debug inviato da GAS
+            const idDalDebug = rawRes.debug?.codFam;
+
+            // Validazione: L'ID non deve corrispondere al FIR (username)
+            if (idDalSocio && idDalSocio.toString() !== username) {
+                idFamigliaFinale = idDalSocio;
+            } else if (idDalDebug && idDalDebug.toString() !== username) {
+                idFamigliaFinale = idDalDebug;
+            }
+        }
+
+        console.log(`🏠 ID FAMIGLIA VALIDATO: ${idFamigliaFinale}`);
+
+        // --- 4. SALVATAGGIO IN MEMORIA GLOBALE ---
+        window.globalData = {
+            userEmail: email,
+            userGroup: userGroup,
+            idFamiglia: idFamigliaFinale.toString(),
+            famiglia: { data: famigliaOggetti },
+            atleti: creaMappa(mapArraysToObjects(rawRes.atleti)),
+            taglieKit: creaMappa(mapArraysToObjects(rawRes.taglie)),
+            privacyData: creaMappa(mapArraysToObjects(rawRes.privacy)),
+            codici: mapArraysToObjects(rawRes.codici),
+            config: uiConfig,
+            funzioni: servizi,
+            articoli: shopData.articoli || [],
+            currentProfile: "ASSOCIATO",
+            selectedMemberIndex: 0
+        };
+
+        // Salvataggio nella valigia di sessione per App Satellite (Shop, Certificati...)
+        sessionStorage.setItem('myoval_shared_data', JSON.stringify(window.globalData));
+
+        renderFinalUI(loading);
 
     } catch (error) {
         console.error("❌ Errore Portale:", error);
         if (typeof mostraErroreBloccante === "function") mostraErroreBloccante(error.message);
-        if (loading) loading.style.display = 'none';
     }
+}
+
+async function renderFinalUI(loading) {
+    if (loading) loading.style.setProperty('display', 'none', 'important');
+
+    const data = window.globalData;
+
+    // Navbar
+    const emailLabel = document.getElementById('user-email-display');
+    if (emailLabel) emailLabel.innerText = data.userEmail;
+
+    // ID Famiglia in alto a destra
+    const idDisplay = document.getElementById('ui-display-id-famiglia');
+    if (idDisplay) idDisplay.innerText = `ID FAMIGLIA: ${data.idFamiglia}`;
+
+    // Switch Viste
+    document.getElementById('onboarding-view')?.classList.add('d-none');
+    document.getElementById('dashboard-view')?.classList.remove('d-none');
+    document.getElementById('dashboard-view')?.style.setProperty('display', 'block', 'important');
+
+    // Componenti
+    buildFamilyUI(data.famiglia.data);
+
+    const { buildFunzioniUI, validateAllMembers } = await import('./anagrafica.js');
+    buildFunzioniUI(data.funzioni);
+    validateAllMembers();
+
+    // Seleziona il membro (usa quello in cache se presente)
+    selectMember(data.selectedMemberIndex || 0);
 }
 
 

@@ -509,79 +509,64 @@ window.handleMemberToggle = function (checkbox, idContatto) {
     if (checkbox.checked) {
         try {
             const art = window.currentArtForConf;
+            if (!art) throw new Error("Nessun articolo selezionato.");
 
-            // 1. Funzione di recupero tollerante per i campi dell'articolo
+            // 1. Funzione di recupero valori dall'articolo (Tollerante)
             const getArtVal = (target) => {
-                const cleanTarget = target.toLowerCase().replace(/_/g, "");
-                const foundKey = Object.keys(art).find(k => k.toLowerCase().replace(/_/g, "") === cleanTarget);
-                const val = (foundKey && art[foundKey]) ? art[foundKey].toString().trim() : null;
-                return (val === "" || val === "null" || val === "undefined") ? null : val;
+                const cleanT = target.toLowerCase().replace(/[\s_]/g, "");
+                const key = Object.keys(art).find(k => k.toLowerCase().replace(/[\s_]/g, "") === cleanT);
+                return key ? art[key] : null;
             };
 
-            const targetGruppo = getArtVal("UI_Gruppo");
-            const targetProfilo = getArtVal("UI_Profilo");
+            // 2. Determiniamo Gruppo e Profilo dall'articolo
+            const targetGruppo = (getArtVal("UI_Gruppo") || "ASSOCIATO").toUpperCase();
+            const targetProfilo = (getArtVal("UI_Profilo") || "ASSOCIATO").toUpperCase();
 
-            // --- LOGICA RICHIESTA: Se mancano i puntamenti UI, non mostriamo il form ---
-            if (!targetGruppo || !targetProfilo) {
-                console.log(`ℹ️ Articolo "${art.Nome_Articolo}" non richiede form anagrafico.`);
-                container.innerHTML = ""; // Contenitore vuoto
-            } else {
-                // --- PROCEDIAMO CON IL RENDERING DINAMICO ---
-                const targetProfiloUpper = targetProfilo.toUpperCase();
-                const configCampi = window.globalData.config[targetProfiloUpper] || [];
+            console.log(`🛠️ Shop: Caricamento Profilo [${targetGruppo} - ${targetProfilo}] per socio ${idContatto}`);
 
-                if (configCampi.length === 0) {
-                    console.warn(`⚠️ Configurazione [${targetProfiloUpper}] non trovata.`);
-                    container.innerHTML = "";
-                } else {
-                    const idCPulito = idContatto.toString().toLowerCase().trim();
-                    const membri = Array.isArray(window.shopCatalog.famiglia) ? window.shopCatalog.famiglia : (window.shopCatalog.famiglia?.data || []);
-                    const mBase = membri.find(f => f.IDContatto.toString() === idContatto.toString());
+            const configCampi = window.globalData.config[targetProfilo] || [];
 
-                    // Merge Dati (Anagrafica + Tecnici + Kit + Privacy)
-                    const fullMemberData = {
-                        ...mBase,
-                        ...(window.globalData.atleti[idCPulito] || {}),
-                        ...(window.globalData.taglieKit[idCPulito] || {}),
-                        ...(window.globalData.privacyData[idCPulito] || {})
-                    };
+            // --- 3. LOGICA DI OVERRIDE MANUALE (SICURA) ---
+            // Invece di aspettare che ui_config ci dica cosa fare, 
+            // forziamo noi la lista squadre se l'articolo la possiede.
+            const overrides = {};
+            const squadreDallArticolo = getArtVal("Lista_Squadre");
 
-                    // Gestione Override Squadre (Articolo:Lista_Squadre)
-                    const overrides = {};
-                    configCampi.forEach(conf => {
-                        const opzioniGrezze = conf.opzioni;
-
-                        if (typeof opzioniGrezze === "string" && opzioniGrezze.toUpperCase().startsWith("ARTICOLO:")) {
-                            const colonnaArt = opzioniGrezze.split(":")[1];
-                            const valoreArt = art[colonnaArt] || art[colonnaArt.replace(/_/g, " ")] || "";
-
-                            console.log(`📡 Risoluzione Override per ${conf.id}: Cerco in colonna [${colonnaArt}], Trovato: "${valoreArt}"`);
-
-                            if (valoreArt) {
-                                overrides[conf.id] = valoreArt.split(',').map(s => s.trim()).filter(Boolean);
-                                console.log(`✅ Opzioni finali per ${conf.id}:`, overrides[conf.id]);
-                            } else {
-                                console.warn(`⚠️ Colonna [${colonnaArt}] vuota o non trovata nell'articolo.`);
-                            }
-                        }
-                    });
-
-                    console.log(`📤 Rendering form [${targetProfiloUpper}] per ${mBase.Nome}`);
-                    window.renderAnagraficaForm(fullMemberData, configCampi, true, containerId, overrides);
-                }
+            if (squadreDallArticolo) {
+                // Creiamo l'array delle opzioni (es: ["Under 18", "Cadetti"])
+                // Lo assegniamo sia a "Squadra" che a "Squadre" per coprire ogni ID possibile
+                const listaArray = squadreDallArticolo.split(',').map(s => s.trim()).filter(Boolean);
+                overrides["Squadra"] = listaArray;
+                overrides["Squadre"] = listaArray;
+                console.log("✅ Squadre forzate dall'articolo:", listaArray);
             }
 
+            // --- 4. PREPARAZIONE DATI MEMBRO ---
+            const idCPulito = idContatto.toString().toLowerCase().trim();
+            const membri = Array.isArray(window.shopCatalog.famiglia) ? window.shopCatalog.famiglia : (window.shopCatalog.famiglia?.data || []);
+            const mBase = membri.find(f => f.IDContatto.toString().toLowerCase().trim() === idCPulito);
+
+            const fullMemberData = {
+                ...mBase,
+                ...(window.globalData.atleti[idCPulito] || {}),
+                ...(window.globalData.taglieKit[idCPulito] || {}),
+                ...(window.globalData.privacyData[idCPulito] || {})
+            };
+
+            // --- 5. RENDERING ---
+            // Passiamo l'oggetto overrides che abbiamo costruito manualmente
+            window.renderAnagraficaForm(fullMemberData, configCampi, true, containerId, overrides);
+
         } catch (e) {
-            console.error("❌ Errore nel caricamento del form membro:", e);
+            console.error("❌ Errore configuratore shop:", e);
+            container.innerHTML = `<div class="text-danger small p-2">Errore caricamento: ${e.message}</div>`;
         }
     } else {
         container.innerHTML = "";
     }
 
-    // Gestione stato tasto "AGGIUNGI"
-    const selezionati = document.querySelectorAll('.conf-membro-check:checked').length;
-    const btnAdd = document.getElementById('btn-add-to-cart');
-    if (btnAdd) btnAdd.disabled = (selezionati === 0);
+    const btn = document.getElementById('btn-add-to-cart');
+    if (btn) btn.disabled = (document.querySelectorAll('.conf-membro-check:checked').length === 0);
 };
 
 /**
@@ -676,11 +661,12 @@ window.addToCart = async function () {
     const loader = document.getElementById('loading-overlay');
     if (loader) {
         loader.style.setProperty('display', 'flex', 'important');
-        loader.querySelector('h5').innerText = "Salvataggio anagrafica e aggiornamento carrello...";
+        loader.querySelector('h5').innerText = "Sincronizzazione dati in corso...";
     }
 
     try {
         const itemsToAdd = [];
+        // Recuperiamo l'array membri una volta sola
         const membri = Array.isArray(window.shopCatalog.famiglia)
             ? window.shopCatalog.famiglia
             : (window.shopCatalog.famiglia?.data || []);
@@ -690,9 +676,9 @@ window.addToCart = async function () {
             const containerMembro = document.getElementById(`personal-data-container-${idC}`);
             if (!containerMembro) continue;
 
+            // Riferimento al membro originale nel magazzino globale
             const memberRef = membri.find(f => f.IDContatto.toString() === idC.toString());
 
-            // --- RACCOLTA DATI DAL FORM DEL MODALE ---
             const fields = containerMembro.querySelectorAll('.val-field');
             const updatePayload = {
                 idContatto: idC,
@@ -705,10 +691,8 @@ window.addToCart = async function () {
                 const fieldId = f.getAttribute('data-id');
                 if (!fieldId) return;
 
-                // Gestione specifica per checkbox/switch
                 const val = (f.type === 'checkbox') ? f.checked : f.value.trim();
 
-                // Validazione obbligatorietà
                 if (f.hasAttribute('required') && (val === "" || val === false)) {
                     f.classList.add('is-invalid');
                     isValid = false;
@@ -726,63 +710,57 @@ window.addToCart = async function () {
                 return;
             }
 
-            // A. SALVATAGGIO IN ANAGRAFICA (GAS) - Chiamata bloccante
-            console.log(`📤 Salvataggio dati tecnici per ${idC}...`, updatePayload);
-            const saveRes = await callGAS("salvaDatiMembro", { payload: updatePayload });
-            if (!saveRes.success) console.warn("Salvataggio anagrafica parziale o fallito lato server.");
+            // --- 1. SALVATAGGIO REALE (SERVER GAS) ---
+            console.log(`📤 Invio dati anagrafici a GAS per ${idC}...`);
+            await callGAS("salvaDatiMembro", { payload: updatePayload });
 
-            // Già aggiorniamo la memoria locale (memberRef), ora aggiorniamo la valigia fisica
-            sessionStorage.setItem('myoval_shared_data', JSON.stringify(window.globalData));
-            console.log("🔄 Dati anagrafici sincronizzati dallo Shop alla Sessione");
-
-            // Aggiorniamo l'oggetto in memoria (RAM)
-            if (memberRef) Object.assign(memberRef, updatePayload);
-
-            // AGGIORNIAMO LA VALIGIA (SessionStorage)
-            sessionStorage.setItem('myoval_shared_data', JSON.stringify(window.globalData));
-
-            console.log("✅ Cache aggiornata con i dati inseriti nello Shop.");
-
-            // B. AGGIORNA MEMORIA LOCALE (per coerenza dashboard)
+            // --- 2. AGGIORNAMENTO MEMORIA LOCALE (RAM) ---
+            // Aggiorniamo l'oggetto membro e le mappe tecniche con i nuovi valori (Squadra, Taglie, ecc)
             if (memberRef) {
                 Object.assign(memberRef, updatePayload);
-                const idCLow = idC.toLowerCase();
+
+                const idCLow = idC.toLowerCase().trim();
+                // Aggiorniamo tutti i "cassetti" dove quel dato potrebbe essere duplicato
                 if (window.globalData.atleti[idCLow]) Object.assign(window.globalData.atleti[idCLow], updatePayload);
                 if (window.globalData.taglieKit[idCLow]) Object.assign(window.globalData.taglieKit[idCLow], updatePayload);
                 if (window.globalData.privacyData[idCLow]) Object.assign(window.globalData.privacyData[idCLow], updatePayload);
             }
 
-            // C. PREPARA ITEM PER CARRELLO
+            // 3. Preparazione per il carrello
             itemsToAdd.push({
                 email: window.globalData.userEmail,
                 idContatto: idC,
                 nomeMembro: memberRef ? `${memberRef.Nome} ${memberRef.Cognome}` : "Socio",
                 idArticolo: art.ID_Articolo,
                 idCategoria: art.ID_Categoria,
-                // --- FIX: Salviamo il Titolo ---
-                nomeArticolo: art.Titolo_Articolo || art.Nome_Articolo,
+                nomeArticolo: art.Nome_Articolo,
                 prezzoBase: window.calculateLivePrice(art).price,
                 metadati: metaData,
                 addedAt: Date.now()
             });
         }
 
-        // 3. SALVATAGGIO NEL CARRELLO PERSISTENTE (GAS)
+        // --- 4. AGGIORNAMENTO CARRELLO PERSISTENTE (GAS) ---
         await Promise.all(itemsToAdd.map(item => callGAS("addToCartPersist", item)));
 
-        // 4. AGGIORNAMENTO UI
+        // --- 5. AGGIORNAMENTO VALIGIA (SESSION STORAGE) ---
+        // Ora che window.globalData è stato aggiornato nel punto 2, lo "congeliamo" nella cache
+        sessionStorage.setItem('myoval_shared_data', JSON.stringify(window.globalData));
+        console.log("💾 Valigia dati (sessionStorage) aggiornata con successo.");
+
+        // 6. AGGIORNAMENTO UI CARRELLO
         itemsToAdd.forEach(i => window.cart.push({ ...i, finalPrice: i.prezzoBase, scontiDettaglio: [] }));
         window.recalculateCart();
         window.renderCartUI();
 
-        // Chiusura modale
+        // 7. CHIUSURA
         const modal = bootstrap.Modal.getInstance(document.getElementById('modalConfiguratore'));
         if (modal) modal.hide();
 
-        alert("✅ Dati salvati e articolo aggiunto al carrello!");
+        alert("✅ Dati aggiornati e aggiunti al carrello!");
 
     } catch (e) {
-        console.error("❌ Errore critico in addToCart:", e);
+        console.error("❌ Errore critico:", e);
         alert("Si è verificato un errore: " + e.message);
     } finally {
         if (loader) loader.style.display = 'none';
