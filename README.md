@@ -31,3 +31,12 @@ Token IDX: E57094A9-3888-453D-A832-4A974423F89A
 
 firebase use staging (per lavorare/distribuire sull'ambiente di test)
 firebase use production (per lavorare/distribuire sull'ambiente di produzione)
+
+
+## UTIILIZZO SCRIPT PER FIREBASE
+Scenario	Script da usare
+"Voglio salvarmi i dati prima di fare modifiche"	node esportazione.js all staging
+"Ho modificato a mano il Foglio Google e voglio inviare le modifiche"	node migrazione.js all staging
+"Ho cancellato per sbaglio dei documenti su Firestore!"	node ripristino.js all staging
+"Voglio copiare i dati da Produzione a Staging"	1. node esportazione.js all prod <br> 2. node ripristino.js all staging
+"Voglio ripulire il database e rimettere solo quello che c'è nel Foglio"	node migrazione.js all staging clean

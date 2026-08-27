@@ -1,4 +1,4 @@
-const GAS_URL = "https://script.google.com/macros/s/AKfycbzGA7xQ5jEOIVB3PCOGE07AcA95soViCjxbiWirrdxOug0hRg5mVEd67Z9daH0AOUAdoA/exec";
+const GAS_URL = "https://script.google.com/macros/s/AKfycbwQSqN9_ByoAhOAz-GgUCS27OAamppiUqp-TpIWlFlz3rF7EXLvBWGnZeRkPKFB-tUc9w/exec";
 
 export function formattaDataRugby(val) {
     if (!val || val === "" || val === "null" || val === undefined) return "-";

@@ -1,5 +1,6 @@
-import { auth } from "./firebase-config.js";
+import { auth, db } from "./firebase-config.js"; // Aggiunto db
 import { onAuthStateChanged } from "firebase/auth";
+import { collection, getDocs, doc, getDoc } from "firebase/firestore"; // Aggiunti questi
 import { callGAS, formatEuro, getThumbnailUrl } from "./utils.js";
 import { renderAnagraficaForm } from "./anagrafica.js";
 
@@ -34,38 +35,63 @@ async function inizializzaShop() {
     if (loader) loader.style.setProperty('display', 'flex', 'important');
 
     try {
-        const params = {
-            email: window.globalData.userEmail,
-            idFamiglia: window.globalData.idFamiglia,
-            membri: window.globalData.famiglia.data,
-            atleti: window.globalData.atleti
+        console.log("🔥 Caricamento catalogo da Firestore...");
+
+        // 1. Caricamento parallelo collezioni catalogo
+        const [catSnap, artSnap, tarSnap, scoSnap] = await Promise.all([
+            getDocs(collection(db, "shop_categories")),
+            getDocs(collection(db, "shop_items")),
+            getDocs(collection(db, "shop_rates")),
+            getDocs(collection(db, "shop_discounts"))
+        ]);
+
+        // 2. Recupero carrello persistente da GAS (Basato su Famiglia)
+        // Passiamo un oggetto per coerenza con lo standard callGAS
+        console.log("📡 Recupero carrello per famiglia:", window.globalData.idFamiglia);
+        const cartRes = await callGAS("getUserCart", { idFamiglia: window.globalData.idFamiglia });
+        const persistedCart = cartRes || [];
+
+        // 3. ARRICCHIMENTO DATI FAMIGLIA (Unione con dati Tecnici/Atleti)
+        const membriRaw = Array.isArray(window.globalData.famiglia?.data)
+            ? window.globalData.famiglia.data
+            : (window.globalData.famiglia || []);
+
+        const membriArricchiti = membriRaw.map(m => {
+            const idRaw = (m.IDContatto || m.ID_Contatto || m.idcontatto || "").toString().toLowerCase().trim();
+            const datiTecnici = window.globalData.atleti[idRaw] || {};
+            // Uniamo i dati: il membro ora ha il campo Tipo (RINNOVO/NUOVO)
+            return { ...m, ...datiTecnici };
+        });
+
+        // 4. CREAZIONE CATALOGO GLOBALE
+        const articoli = artSnap.docs.map(d => ({ ID_Articolo: d.id, ...d.data() }));
+
+        window.shopCatalog = {
+            success: true,
+            categorie: catSnap.docs.map(d => ({ ID_Categoria: d.id, ...d.data() })),
+            articoli: articoli,
+            tariffe: tarSnap.docs.map(d => ({ ID_Tariffa: d.id, ...d.data() })),
+            sconti: scoSnap.docs.map(d => ({ ID_Sconto: d.id, ...d.data() })),
+            famiglia: membriArricchiti
         };
 
-        const res = await callGAS("getShopPortalDataWithCart", params);
-        if (!res || !res.success) throw new Error(res ? res.error : "Errore catalogo");
+        // 5. MAPPING CARRELLO (Normalizzazione e recupero nomi)
+        console.log("📡 Dati grezzi ricevuti da GAS:", persistedCart);
 
-        window.shopCatalog = res;
+        window.cart = (persistedCart || []).map(item => {
+            // Usiamo i nomi delle colonne del tuo Spreadsheet (Controlla se c'è l'underscore!)
+            const idC = (item.ID_Contatto || item.id_contatto || item["ID Contatto"] || "").toString();
+            const idA = (item.ID_Articolo || item.id_articolo || item["ID Articolo"] || "").toString();
 
-        // --- MAPPING CARRELLO CON RECUPERO TITOLO ARTICOLO ---
-        window.cart = (res.persistedCart || []).map(item => {
-            const artId = (item.ID_Articolo || item.idArticolo || "").toString();
-
-            // Cerchiamo i dettagli dell'articolo nel catalogo scaricato per prendere il Titolo
-            const artInfo = (res.articoli || []).find(a => a.ID_Articolo === artId);
-
-            // Logica di priorità nome: Titolo Visualizzato -> Nome Tecnico -> Valore da Spreadsheet
-            const nomeDaVisualizzare = artInfo ?
-                (artInfo.Titolo_Articolo || artInfo.Nome_Articolo) :
-                (item.Nome_Articolo || item.nomeArticolo || "Articolo");
+            const artInfo = window.shopCatalog.articoli.find(a => a.ID_Articolo === idA);
 
             return {
-                idContatto: (item.ID_Contatto || item.idcontatto || "").toString(),
-                nomeMembro: item.Nome_Membro || item.nomemembro || "",
-                idArticolo: artId,
-                // --- APPLICAZIONE MODIFICA ---
-                nomeArticolo: nomeDaVisualizzare,
-                idCategoria: (item.ID_Categoria || item.idcategoria || "").toString(),
-                metadati: item.Metadati_JSON || {},
+                idContatto: idC,
+                nomeMembro: item.Nome_Membro || item.nome_membro || item["Nome Membro"] || "",
+                idArticolo: idA,
+                nomeArticolo: artInfo ? (artInfo.Titolo_Articolo || artInfo.Nome_Articolo) : (item.Nome_Articolo || "Articolo"),
+                idCategoria: (item.ID_Categoria || item.id_categoria || "").toString(),
+                metadati: (typeof item.Metadati_JSON === 'string') ? JSON.parse(item.Metadati_JSON) : (item.Metadati_JSON || {}),
                 addedAt: item.Data_Aggiunta || Date.now(),
                 prezzoBase: 0,
                 finalPrice: 0,
@@ -73,14 +99,15 @@ async function inizializzaShop() {
             };
         });
 
-        console.log(`🛒 Carrello sincronizzato con ${window.cart.length} articoli.`);
+        console.log(`🛒 Carrello sincronizzato: ${window.cart.length} articoli per la famiglia.`);
 
+        // 6. Ricalcolo e Rendering
         window.recalculateCart();
         window.renderShopHome();
 
     } catch (e) {
-        console.error("Errore inizializzazione:", e);
-        alert("Errore: " + e.message);
+        console.error("❌ Errore critico inizializzazione Shop:", e);
+        if (typeof mostraErroreBloccante === "function") mostraErroreBloccante("Impossibile caricare il catalogo.");
     } finally {
         if (loader) loader.style.setProperty('display', 'none', 'important');
     }
@@ -239,27 +266,61 @@ window.updateCartUI = function () {
     if (countEl) countEl.innerText = window.cart.length;
 };
 
-/**
- * RENDER ARTICOLI DELLA CATEGORIA SELEZIONATA
- */
+
 window.openShopCategory = function (idCat) {
     if (!window.shopCatalog) return;
+
+    // 1. TROVA LA CATEGORIA E IL SUO TIPO (es. TESSERAMENTO)
     const cat = window.shopCatalog.categorie.find(c => c.ID_Categoria === idCat);
     if (!cat) return;
 
+    const tipoDellaCategoria = (cat.Tipo_Articolo || "").toUpperCase().trim();
+
+    // 2. GESTIONE BREADCRUMB
     document.getElementById('shop-breadcrumb')?.classList.remove('d-none');
     const labelHome = document.getElementById('breadcrumb-label-home');
     if (labelHome) labelHome.innerText = "Torna al Catalogo";
     const labelCurrent = document.getElementById('breadcrumb-current');
     if (labelCurrent) labelCurrent.innerText = cat.Nome_Categoria;
 
-    const membri = Array.isArray(window.shopCatalog.famiglia) ? window.shopCatalog.famiglia : (window.shopCatalog.famiglia?.data || []);
-    const articoliIdonei = (window.shopCatalog.articoli || []).filter(a =>
-        a.ID_Categoria === idCat && membri.some(m => window.checkEligibility(a, m))
-    );
+    // 3. RECUPERO, ARRICCHIMENTO E DE-DUPLICAZIONE MEMBRI (FIX CRITICO)
+    const membriRaw = Array.isArray(window.shopCatalog.famiglia)
+        ? window.shopCatalog.famiglia
+        : (window.shopCatalog.famiglia?.data || []);
 
+    // Usiamo una mappa per assicurarci di avere un solo oggetto per ogni IDContatto
+    const mappaMembriUnici = new Map();
+
+    membriRaw.forEach(m => {
+        const idRaw = m.IDContatto || m.ID_Contatto || m.idcontatto || m.id_contatto || "";
+        const idKey = idRaw.toString().trim();
+
+        if (!idKey || mappaMembriUnici.has(idKey)) return;
+
+        // Recuperiamo i dati tecnici (Tipo: RINNOVO) usando l'ID minuscolo come chiave
+        const datiTecnici = window.globalData.atleti[idKey.toLowerCase()] || {};
+
+        // Creiamo l'oggetto arricchito
+        const membroArricchito = { ...m, ...datiTecnici };
+        mappaMembriUnici.set(idKey, membroArricchito);
+    });
+
+    const membriArricchiti = Array.from(mappaMembriUnici.values());
+    console.log(`👨‍👩‍👧‍👦 Membri unici analizzati per idoneità: ${membriArricchiti.length}`);
+
+    // 4. FILTRO ARTICOLI IDONEI
+    const articoliIdonei = (window.shopCatalog.articoli || []).filter(a => {
+        if (a.ID_Categoria !== idCat) return false;
+
+        // Iniezione tipo categoria nell'articolo per attivare i filtri NUOVO/RINNOVO
+        a.Tipo_Articolo = tipoDellaCategoria;
+
+        // L'articolo è idoneo se ALMENO un membro della famiglia passa la checkEligibility
+        return membriArricchiti.some(m => window.checkEligibility(a, m));
+    });
+
+    // 5. GENERAZIONE HTML
     const container = document.getElementById('shop-content-area');
-
     let html = `
         <div class="mb-4 animate__animated animate__fadeIn">
             <button class="btn btn-outline-secondary btn-sm rounded-pill px-3 shadow-sm mb-3" 
@@ -272,30 +333,39 @@ window.openShopCategory = function (idCat) {
         <div class="row g-2 animate__animated animate__fadeIn">`;
 
     if (articoliIdonei.length === 0) {
-        html += '<div class="col-12 text-center p-5 text-muted">Nessun articolo disponibile.</div>';
+        html += '<div class="col-12 text-center p-5 text-muted">Nessun articolo disponibile per i componenti della tua famiglia.</div>';
     } else {
         articoliIdonei.forEach(art => {
             const lp = window.calculateLivePrice(art);
             const pDisp = lp.isValid ? formatEuro(lp.price) : `<span class="text-muted small">NON DISPONIBILE</span>`;
 
-            // Logica per calcolare la fascia d'età
-            const minAnno = Math.min(parseInt(art.Da_Anni || 1900), parseInt(art.A_Anni || 1900));
-            const maxAnno = Math.max(parseInt(art.Da_Anni || 2100), parseInt(art.A_Anni || 2100));
-            const natiString = (art.Da_Anni || art.A_Anni) ? `Nati dal ${minAnno} al ${maxAnno}` : "Aperto a tutti";
+            const daAnni = parseInt(art.Da_Anni);
+            const aAnni = parseInt(art.A_Anni);
+            let natiString = "Aperto a tutti";
+            if (!isNaN(daAnni) || !isNaN(aAnni)) {
+                const min = Math.min(daAnni || 1900, aAnni || 1900);
+                const max = Math.max(daAnni || 2100, aAnni || 2100);
+                natiString = `Nati dal ${min} al ${max}`;
+            }
 
             html += `
             <div class="col-12">
                 <div class="card product-row-card shadow-sm" style="${!lp.isValid ? 'opacity:0.6' : ''}">
                     <div class="row align-items-center g-2">
                         <div class="col-7 ps-2">
-                            <!-- 1. Visualizziamo Titolo_Articolo -->
-                            <h6 class="fw-bold mb-0" style="font-size:1rem; color:#1a2b3c;">${art.Titolo_Articolo || art.Nome_Articolo}</h6>
-                            <!-- 2. Aggiungiamo info Nati dal/al -->
-                            <div class="nati-info"><i class="far fa-calendar-alt me-1"></i> ${natiString}</div>
+                            <h6 class="fw-bold mb-0" style="font-size:1rem; color:#1a2b3c;">
+                                ${art.Titolo_Articolo || art.Nome_Articolo}
+                            </h6>
+                            <div class="nati-info" style="font-size: 0.75rem; color: #6c757d;">
+                                <i class="far fa-calendar-alt me-1"></i> ${natiString}
+                            </div>
                         </div>
                         <div class="col-3 text-end">
-                            <div class="fw-bold text-danger" style="font-size:1.2rem; font-family: 'Roboto Mono', monospace;">${pDisp}</div>
-                            ${lp.isDynamic && lp.isValid ? `<small class="text-success fw-bold d-block" style="font-size:8px; line-height:1;">${lp.label}</small>` : ''}
+                            <div class="fw-bold text-danger" style="font-size:1.2rem; font-family: 'Roboto Mono', monospace;">
+                                ${pDisp}
+                            </div>
+                            ${lp.isValid && lp.label !== "Quota Base" ?
+                    `<small class="text-success fw-bold d-block" style="font-size:8px; line-height:1;">${lp.label}</small>` : ''}
                         </div>
                         <div class="col-2 text-end pe-2">
                             <button class="btn btn-danger btn-sm rounded-pill fw-bold" 
@@ -312,10 +382,9 @@ window.openShopCategory = function (idCat) {
     }
 
     container.innerHTML = html + '</div>';
-
-    // 4. FOCUS IN ALTO
     window.scrollTo({ top: 0, behavior: 'smooth' });
 };
+
 
 /**
  * 3. FIX: AGGANCIO GLOBALE FUNZIONI UI
@@ -355,44 +424,77 @@ window.removeAndRefresh = async function (index) {
     const item = window.cart[index];
     if (!item || !confirm("Rimuovere l'articolo?")) return;
     try {
-        await callGAS("removeFromCartPersist", { idContatto: item.idContatto, idArticolo: item.idArticolo, email: window.globalData.userEmail });
+        await callGAS("removeFromCartPersist", {
+            idFamiglia: window.globalData.idFamiglia,
+            idContatto: item.idContatto,
+            idArticolo: item.idArticolo
+        });
         window.cart.splice(index, 1);
         window.recalculateCart();
     } catch (e) { alert(e.message); }
 };
-
 
 /**
  * 1. MOTORE DI IDONEITÀ
  */
 window.checkEligibility = function (art, atleta) {
     if (!art || !atleta) return false;
-    if (art.Pubblicato !== true && art.Pubblicato !== "TRUE") return false;
 
+    // 1. FILTRO PUBBLICAZIONE
+    // Gestisce sia il booleano nativo di Firestore che la stringa "TRUE"
+    const isPubblicato = art.Pubblicato === true || art.Pubblicato === "TRUE";
+    if (!isPubblicato) return false;
+
+    // 2. FILTRO SESSO (Rigido)
+    // Se l'articolo specifica M o F, l'atleta deve corrispondere. Se vuoto, è per tutti.
+    const sessoRichiesto = (art.Sesso || "").toString().trim().toUpperCase();
+    const sessoAtleta = (atleta.Sesso || "").toString().trim().toUpperCase();
+    if (sessoRichiesto !== "" && sessoAtleta !== "" && sessoAtleta !== sessoRichiesto) {
+        return false;
+    }
+
+    // 3. FILTRO ANNO DI NASCITA
+    // Estrae l'anno a 4 cifre da qualsiasi formato di data (DD/MM/YYYY o YYYY-MM-DD)
     const dnRaw = (atleta.Data_Nascita || "").toString();
-    const match = dnRaw.match(/\d{4}/);
-    const annoAtleta = match ? parseInt(match[0]) : 0;
+    const matchAnno = dnRaw.match(/\d{4}/);
+    const annoAtleta = matchAnno ? parseInt(matchAnno[0]) : 0;
 
-    if (art.Da_Anni || art.A_Anni) {
-        const min = Math.min(parseInt(art.Da_Anni || 1900), parseInt(art.A_Anni || 1900));
-        const max = Math.max(parseInt(art.Da_Anni || 2100), parseInt(art.A_Anni || 2100));
-        if (annoAtleta > 0 && (annoAtleta < min || annoAtleta > max)) return false;
+    const daAnni = parseInt(art.Da_Anni);
+    const aAnni = parseInt(art.A_Anni);
+
+    if (!isNaN(daAnni) || !isNaN(aAnni)) {
+        const min = Math.min(daAnni || 1900, aAnni || 1900);
+        const max = Math.max(daAnni || 2100, aAnni || 2100);
+
+        if (annoAtleta > 0 && (annoAtleta < min || annoAtleta > max)) {
+            return false; // Fuori fascia d'età
+        }
     }
 
-    const sessoReq = (art.Sesso || "").toString().trim().toUpperCase();
-    const sessoAtl = (atleta.Sesso || "").toString().trim().toUpperCase();
-    if (sessoReq !== "" && sessoAtl !== "" && sessoAtl !== sessoReq) return false;
+    // 4. FILTRO TESSERAMENTO (NUOVO / RINNOVO)
+    // Il campo Tipo_Articolo viene iniettato dalla categoria in openShopCategory
+    const tipoArticoloPadre = (art.Tipo_Articolo || "").toString().toUpperCase().trim();
 
-    if (art.Tipo_Articolo === 'TESSERAMENTO') {
-        const ruolo = (atleta.Ruolo || "").toLowerCase();
-        if (!ruolo.includes("atleta")) return false;
-        const profiloTecnico = (atleta.Tipo_Tecnico || "NUOVO").toUpperCase();
-        const tipoArticolo = (art.Tipo_Tesseramento || "NUOVO").toUpperCase();
-        if (profiloTecnico !== tipoArticolo) return false;
+    if (tipoArticoloPadre === 'TESSERAMENTO') {
+
+        // Recuperiamo il profilo dell'atleta (Dall'anagrafica tecnica)
+        // Usiamo "Tipo" (visto nei log) o "Tipo_Tecnico" come fallback
+        const profiloAtleta = (atleta.Tipo || atleta.Tipo_Tecnico || "NUOVO").toString().toUpperCase().trim();
+
+        // Recuperiamo il requisito dell'articolo (Da Firestore shop_items)
+        const tipoRichiestoDallArticolo = (art.Tipo_Tesseramento || "NUOVO").toString().toUpperCase().trim();
+
+        // LOG DI CONTROLLO (Solo per Tesseramento)
+        console.log(`🔍 Verifica Tesseramento [${atleta.Nome}]: Profilo(${profiloAtleta}) vs Articolo(${tipoRichiestoDallArticolo})`);
+
+        if (profiloAtleta !== tipoRichiestoDallArticolo) {
+            return false; // Mismatch tra Nuovo/Rinnovo
+        }
     }
+
+    // Se è arrivato qui, l'atleta è idoneo
     return true;
 };
-
 
 /**
  * 3. RENDER HOME (CATEGORIE)
@@ -453,45 +555,76 @@ window.renderShopHome = function () {
 /**
  * 5. CONFIGURATORE ACQUISTO
  */
+
 window.startConfigurator = function (idArt) {
     const art = window.shopCatalog.articoli.find(a => a.ID_Articolo === idArt);
     if (!art) return;
     window.currentArtForConf = art;
 
-    // 1. Visualizzazione Titolo Leggibile
+    // --- FIX 1: INIEZIONE TIPO CATEGORIA ---
+    // Recuperiamo il tipo dalla categoria padre per attivare i filtri tecnici (TESSERAMENTO)
+    const catPadre = window.shopCatalog.categorie.find(c => c.ID_Categoria === art.ID_Categoria);
+    art.Tipo_Articolo = (catPadre?.Tipo_Articolo || "").toUpperCase().trim();
+
+    // Visualizzazione Titolo
     const titleEl = document.getElementById('conf-titolo-articolo');
     if (titleEl) titleEl.innerText = (art.Titolo_Articolo || art.Nome_Articolo).toUpperCase();
 
+    // Visualizzazione Prezzo
     const priceEl = document.getElementById('conf-display-prezzo');
     if (priceEl) priceEl.innerText = formatEuro(window.calculateLivePrice(art).price);
 
     const containerMembri = document.getElementById('conf-membri-list');
     if (containerMembri) {
-        const membri = Array.isArray(window.shopCatalog.famiglia)
+        // --- FIX 2: RECUPERO, DE-DUPLICAZIONE E ARRICCHIMENTO ---
+        const membriRaw = Array.isArray(window.shopCatalog.famiglia)
             ? window.shopCatalog.famiglia
             : (window.shopCatalog.famiglia?.data || []);
 
-        containerMembri.innerHTML = membri
-            .filter(m => window.checkEligibility(art, m))
-            .map(m => `
-        <div class="member-card-wrapper">
-            <!-- Layout Flex pulito senza margini negativi -->
-            <div class="d-flex align-items-center m-0">
-                <input class="form-check-input conf-membro-check" 
-                       type="checkbox" 
-                       value="${m.IDContatto}" 
-                       id="m_${m.IDContatto}"
-                       onchange="window.handleMemberToggle(this, '${m.IDContatto}')"
-                       style="margin-left:0;">
-                <label class="fw-bold text-dark mb-0" for="m_${m.IDContatto}" style="font-size: 0.85rem; cursor:pointer;">
-                    ${m.Nome} ${m.Cognome}
-                </label>
-            </div>
-            <!-- Contenitore dati anagrafici/tecnici -->
-            <div id="personal-data-container-${m.IDContatto}" class="mt-2"></div>
-        </div>`).join('');
+        const mappaMembriUnici = new Map();
+
+        membriRaw.forEach(m => {
+            const idRaw = m.IDContatto || m.ID_Contatto || m.idcontatto || m.id_contatto || "";
+            const idKey = idRaw.toString().trim();
+
+            if (!idKey || mappaMembriUnici.has(idKey)) return;
+
+            // Agganciamo i dati tecnici (Tipo: RINNOVO)
+            const datiTecnici = window.globalData.atleti[idKey.toLowerCase()] || {};
+            mappaMembriUnici.set(idKey, { ...m, ...datiTecnici });
+        });
+
+        // --- FIX 3: FILTRO IDONEITÀ ---
+        // Ora Federico (che è RINNOVO) passerà la checkEligibility per l'articolo RINNOVO
+        const membriIdonei = Array.from(mappaMembriUnici.values())
+            .filter(m => window.checkEligibility(art, m));
+
+        if (membriIdonei.length === 0) {
+            containerMembri.innerHTML = `<div class="text-muted small p-3 text-center">Nessun membro della famiglia è idoneo per questo articolo.</div>`;
+        } else {
+            containerMembri.innerHTML = membriIdonei.map(m => `
+                <div class="member-card-wrapper">
+                    <div class="d-flex align-items-center m-0">
+                        <input class="form-check-input conf-membro-check" 
+                               type="checkbox" 
+                               value="${m.IDContatto || m.id_contatto}" 
+                               id="m_${m.IDContatto || m.id_contatto}"
+                               onchange="window.handleMemberToggle(this, '${m.IDContatto || m.id_contatto}')"
+                               style="margin-left:0;">
+                        <label class="fw-bold text-dark mb-0 ms-2" for="m_${m.IDContatto || m.id_contatto}" style="font-size: 0.85rem; cursor:pointer;">
+                            ${m.Nome} ${m.Cognome}
+                        </label>
+                    </div>
+                    <div id="personal-data-container-${m.IDContatto || m.id_contatto}" class="mt-2"></div>
+                </div>`).join('');
+        }
     }
 
+    // Abilitazione bottone AGGIUNGI (inizialmente disattivato)
+    const btnAdd = document.getElementById('btn-add-to-cart');
+    if (btnAdd) btnAdd.disabled = true;
+
+    // Apertura Modale
     const modalEl = document.getElementById('modalConfiguratore');
     if (modalEl && window.bootstrap) {
         window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -575,18 +708,35 @@ window.handleMemberToggle = function (checkbox, idContatto) {
 window.calculateLivePrice = function (art) {
     const basePrice = parseFloat(art ? (art.Prezzo_Default || 0) : 0);
     const listinoNome = (art && art.Nome_Quota) ? art.Nome_Quota.toString().trim() : "";
+
     if (listinoNome === "") return { price: basePrice, label: "Quota Base", isValid: basePrice > 0 };
 
     const oggi = new Date();
-    const oggiInt = (oggi.getFullYear() * 10000) + ((oggi.getMonth() + 1) * 100) + oggi.getDate();
-    const tariffe = (window.shopCatalog.tariffe || []).filter(t => t.Nome_Tariffa?.toUpperCase() === listinoNome.toUpperCase());
+    oggi.setHours(0, 0, 0, 0);
+
+    const tariffe = (window.shopCatalog.tariffe || []).filter(t =>
+        (t.Nome_Tariffa || t.Nome_Quota || "").toString().toUpperCase().trim() === listinoNome.toUpperCase()
+    );
+
     const valid = tariffe.find(t => {
-        const d = new Date(t.Valido_Dal); const a = new Date(t.Valido_Al);
-        const di = (d.getFullYear() * 10000) + ((d.getMonth() + 1) * 100) + d.getDate();
-        const ai = (a.getFullYear() * 10000) + ((a.getMonth() + 1) * 100) + a.getDate();
-        return oggiInt >= di && oggiInt <= ai;
+        // Firebase restituisce oggetti con metodo .toDate()
+        const dal = t.Valido_Dal?.toDate ? t.Valido_Dal.toDate() : (t.Valido_Dal instanceof Date ? t.Valido_Dal : null);
+        const al = t.Valido_Al?.toDate ? t.Valido_Al.toDate() : (t.Valido_Al instanceof Date ? t.Valido_Al : null);
+
+        if (!dal || !al) return false;
+
+        dal.setHours(0, 0, 0, 0);
+        al.setHours(23, 59, 59, 999);
+
+        return oggi >= dal && oggi <= al;
     });
-    return valid ? { price: parseFloat(valid.Prezzo), label: "Tariffa Attiva", isValid: true } : { price: 0, label: "CHIUSO", isValid: false };
+
+    if (valid) {
+        const prezzoFinale = parseFloat(valid.Prezzo || valid.Importo || 0);
+        return { price: prezzoFinale, label: valid.Etichetta_Prezzo || "Tariffa Attiva", isValid: true };
+    } else {
+        return { price: 0, label: "CHIUSO", isValid: false };
+    }
 };
 
 /**
@@ -666,18 +816,14 @@ window.addToCart = async function () {
 
     try {
         const itemsToAdd = [];
-        // Recuperiamo l'array membri una volta sola
-        const membri = Array.isArray(window.shopCatalog.famiglia)
-            ? window.shopCatalog.famiglia
-            : (window.shopCatalog.famiglia?.data || []);
+        const membri = window.shopCatalog.famiglia; // Già arricchiti in inizializzaShop
 
         for (const cb of checks) {
             const idC = cb.value;
             const containerMembro = document.getElementById(`personal-data-container-${idC}`);
             if (!containerMembro) continue;
 
-            // Riferimento al membro originale nel magazzino globale
-            const memberRef = membri.find(f => f.IDContatto.toString() === idC.toString());
+            const memberRef = membri.find(f => (f.IDContatto || f.id_contatto || "").toString() === idC.toString());
 
             const fields = containerMembro.querySelectorAll('.val-field');
             const updatePayload = {
@@ -690,7 +836,6 @@ window.addToCart = async function () {
             fields.forEach(f => {
                 const fieldId = f.getAttribute('data-id');
                 if (!fieldId) return;
-
                 const val = (f.type === 'checkbox') ? f.checked : f.value.trim();
 
                 if (f.hasAttribute('required') && (val === "" || val === false)) {
@@ -699,7 +844,6 @@ window.addToCart = async function () {
                 } else {
                     f.classList.remove('is-invalid');
                 }
-
                 updatePayload[fieldId] = val;
                 metaData[fieldId] = val;
             });
@@ -710,57 +854,57 @@ window.addToCart = async function () {
                 return;
             }
 
-            // --- 1. SALVATAGGIO REALE (SERVER GAS) ---
+            // 1. SALVATAGGIO ANAGRAFICA (GAS)
             console.log(`📤 Invio dati anagrafici a GAS per ${idC}...`);
             await callGAS("salvaDatiMembro", { payload: updatePayload });
 
-            // --- 2. AGGIORNAMENTO MEMORIA LOCALE (RAM) ---
-            // Aggiorniamo l'oggetto membro e le mappe tecniche con i nuovi valori (Squadra, Taglie, ecc)
+            // 2. AGGIORNAMENTO MEMORIA LOCALE (RAM)
             if (memberRef) {
                 Object.assign(memberRef, updatePayload);
-
                 const idCLow = idC.toLowerCase().trim();
-                // Aggiorniamo tutti i "cassetti" dove quel dato potrebbe essere duplicato
                 if (window.globalData.atleti[idCLow]) Object.assign(window.globalData.atleti[idCLow], updatePayload);
-                if (window.globalData.taglieKit[idCLow]) Object.assign(window.globalData.taglieKit[idCLow], updatePayload);
-                if (window.globalData.privacyData[idCLow]) Object.assign(window.globalData.privacyData[idCLow], updatePayload);
             }
 
-            // 3. Preparazione per il carrello
+            // 3. PREPARAZIONE OGGETTO PER CARRELLO
             itemsToAdd.push({
+                idFamiglia: window.globalData.idFamiglia, // <--- CAMPO CHIAVE
                 email: window.globalData.userEmail,
-                idContatto: idC,
+                idContatto: idC.toString(),
                 nomeMembro: memberRef ? `${memberRef.Nome} ${memberRef.Cognome}` : "Socio",
-                idArticolo: art.ID_Articolo,
+                idArticolo: art.ID_Articolo.toString(),
                 idCategoria: art.ID_Categoria,
-                nomeArticolo: art.Nome_Articolo,
+                nomeArticolo: art.Titolo_Articolo || art.Nome_Articolo,
                 prezzoBase: window.calculateLivePrice(art).price,
-                metadati: metaData,
-                addedAt: Date.now()
+                metadati: metaData
             });
         }
 
-        // --- 4. AGGIORNAMENTO CARRELLO PERSISTENTE (GAS) ---
+        // 4. AGGIORNAMENTO CARRELLO SPREADSHEET (GAS)
+        console.log("📤 Invio articoli al carrello della famiglia...");
+        // Usiamo Promise.all per inviare tutti i membri selezionati
         await Promise.all(itemsToAdd.map(item => callGAS("addToCartPersist", item)));
 
-        // --- 5. AGGIORNAMENTO VALIGIA (SESSION STORAGE) ---
-        // Ora che window.globalData è stato aggiornato nel punto 2, lo "congeliamo" nella cache
-        sessionStorage.setItem('myoval_shared_data', JSON.stringify(window.globalData));
-        console.log("💾 Valigia dati (sessionStorage) aggiornata con successo.");
+        // 5. AGGIORNAMENTO UI LOCALE
+        itemsToAdd.forEach(item => {
+            window.cart.push({
+                ...item,
+                finalPrice: item.prezzoBase,
+                scontiDettaglio: [],
+                addedAt: Date.now()
+            });
+        });
 
-        // 6. AGGIORNAMENTO UI CARRELLO
-        itemsToAdd.forEach(i => window.cart.push({ ...i, finalPrice: i.prezzoBase, scontiDettaglio: [] }));
         window.recalculateCart();
         window.renderCartUI();
 
-        // 7. CHIUSURA
+        // 6. CHIUSURA
         const modal = bootstrap.Modal.getInstance(document.getElementById('modalConfiguratore'));
         if (modal) modal.hide();
 
-        alert("✅ Dati aggiornati e aggiunti al carrello!");
+        alert("✅ Iscrizioni aggiunte al carrello!");
 
     } catch (e) {
-        console.error("❌ Errore critico:", e);
+        console.error("❌ Errore critico addToCart:", e);
         alert("Si è verificato un errore: " + e.message);
     } finally {
         if (loader) loader.style.display = 'none';

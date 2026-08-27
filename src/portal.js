@@ -61,7 +61,15 @@ export async function initPortal(user) {
                 // Avvio Wizard per nuovi utenti
                 return avviaOnboardingSequence(email, loading);
             }
+
             const accountData = accountSnap.data();
+            idFamigliaDaFirestore = accountData.ID_Famiglia || accountData.id_famiglia;
+
+            // --- AGGIUNTA: Se non è staff, prendiamo il gruppo dall'account ---
+            if (userGroup === "ASSOCIATO") {
+                userGroup = (accountData.Gruppo || accountData.Ruolo || "ASSOCIATO").toUpperCase().trim();
+            }
+            console.log("👤 GRUPPO DEFINITIVO:", userGroup);
             idFamigliaDaFirestore = accountData.ID_Famiglia || accountData.id_famiglia;
             gasAction = "GetDatiFamigliaAnagTesseratiIDFam";
             gasParams = { idFamiglia: idFamigliaDaFirestore ? idFamigliaDaFirestore.toString() : "" };
@@ -69,14 +77,23 @@ export async function initPortal(user) {
 
         // C. Chiamata Parallela Bridge GAS e Firestore
         console.log(`📡 Chiamata Bridge: ${gasAction}...`);
-        const [rawRes, uiConfig, servizi, shopData] = await Promise.all([
+
+        // --- MODIFICA QUI ---
+        // Rimuoviamo getShopPortalDataWithCart e usiamo Firestore + getUserCart
+        const [rawRes, uiConfig, servizi, cartData, shopArticoliSnap] = await Promise.all([
             callGAS(gasAction, gasParams),
             getUIConfigByGroup(userGroup),
             getServiziOnlineByGroup(userGroup),
-            callGAS("getShopPortalDataWithCart", { email, idFamiglia: idFamigliaDaFirestore || "0", membri: [] })
+            // Recuperiamo solo il carrello da GAS
+            callGAS("getUserCart", { idFamiglia: idFamigliaDaFirestore || "0" }),
+            // Recuperiamo gli articoli da Firestore (se servono per la dashboard)
+            getDocs(collection(db, "shop_items"))
         ]);
 
         if (!rawRes || !rawRes.famiglia) throw new Error("Dati non ricevuti dal server Google.");
+
+        // Prepariamo l'array degli articoli da Firestore
+        const articoliShop = shopArticoliSnap.docs.map(d => ({ ID_Articolo: d.id, ...d.data() }));
 
         // D. Mapping Dati
         const famigliaOggetti = mapArraysToObjects(rawRes.famiglia);
@@ -125,7 +142,9 @@ export async function initPortal(user) {
             codici: mapArraysToObjects(rawRes.codici),
             config: uiConfig,
             funzioni: servizi,
-            articoli: shopData.articoli || [],
+            // DATI SHOP DA FIRESTORE + CARRELLO GAS
+            articoli: articoliShop,
+            persistedCart: cartData || [],
             currentProfile: "ASSOCIATO",
             selectedMemberIndex: 0
         };
@@ -394,23 +413,30 @@ export function buildFunzioni(lista) {
  */
 async function getServiziOnlineByGroup(groupName) {
     try {
-        const gName = groupName.toUpperCase().trim();
+        const gName = (groupName || "ALL").toUpperCase().trim();
         console.log(`%c 🛰️ INIZIO RECUPERO SERVIZI PER: ${gName} `, "background: #1a2b3c; color: #fff; font-weight: bold;");
 
-        // 1. Recupero regole di accesso dal database
+        // Funzione di utilità per normalizzare le chiavi come fa il migratore
+        const normalize = (str) => str ? str.toString().toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') : "";
+
+        // 1. Recupero regole di accesso
         const qAccess = query(collection(db, "config_access"), where("Gruppo", "in", [gName, "ALL"]));
         const accessSnap = await getDocs(qAccess);
+
+        if (accessSnap.empty) {
+            console.warn(`⚠️ Nessuna regola di accesso trovata per il gruppo ${gName} in config_access`);
+        }
 
         const mappingAccesso = {};
         accessSnap.forEach(docSnap => {
             const d = docSnap.data();
-            // Cerchiamo il nome funzione (tollerante a Funzione/Funzionalit)
-            const fKey = (d.Funzione || d.Funzionalit || "").toLowerCase().trim();
+            // Normalizziamo la funzione scritta nel campo del documento
+            const fKey = normalize(d.Funzione || d.Funzionalit || "");
+
             if (fKey) {
-                // Forziamo il valore a Numero
                 const valOrdine = parseInt(d.Ordine);
                 mappingAccesso[fKey] = isNaN(valOrdine) ? 99 : valOrdine;
-                console.log(`📍 Da Spreadsheet Accessi -> Funzione: "${fKey}" | Ordine: ${mappingAccesso[fKey]}`);
+                console.log(`📍 Accesso trovato -> Funzione: "${fKey}" | Ordine: ${mappingAccesso[fKey]}`);
             }
         });
 
@@ -419,27 +445,28 @@ async function getServiziOnlineByGroup(groupName) {
         const listaFinal = [];
 
         featuresSnap.forEach(docSnap => {
-            const fId = docSnap.id.toLowerCase().trim();
+            // Normalizziamo l'ID del documento della feature
+            const fId = normalize(docSnap.id);
 
             if (mappingAccesso[fId] !== undefined) {
                 const d = docSnap.data();
                 listaFinal.push({
-                    nome: d.Nome || docSnap.id,
+                    nome: d.Nome || d.Titolo || docSnap.id,
                     link: d.Link_o_Mode || d.Link || "",
                     tipo: (d.Tipo || "IFRAME").toUpperCase(),
-                    // Assegniamo l'ordine numerico trovato prima
                     ordine: mappingAccesso[fId]
                 });
+                console.log(`✅ Feature matchata: ${fId}`);
+            } else {
+                // Log di debug per capire perché non matchano
+                // console.log(`x Feature saltata: ${fId} (Non presente nel mapping del gruppo)`);
             }
         });
-
-        // --- IL LOG CRITICO ---
-        console.log("📦 Lista PRIMA del sort:", listaFinal.map(f => `${f.ordine}: ${f.nome}`));
 
         // 3. ORDINAMENTO NUMERICO
         listaFinal.sort((a, b) => a.ordine - b.ordine);
 
-        console.log("%c ✅ LISTA DOPO IL SORT (Ordine finale): ", "color: #28a745; font-weight: bold;", listaFinal.map(f => `${f.ordine}: ${f.nome}`));
+        console.log("%c ✅ LISTA FINALE: ", "color: #28a745; font-weight: bold;", listaFinal);
 
         return listaFinal;
 

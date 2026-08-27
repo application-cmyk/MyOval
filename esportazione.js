@@ -1,5 +1,5 @@
-const { initializeApp, cert } = require('firebase-admin/app'); // <--- QUESTA RIGA MANCAVA
-const { getFirestore } = require('firebase-admin/firestore');  // <--- QUESTA RIGA MANCAVA
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
 const { google } = require('googleapis');
 
 const args = process.argv.slice(2);
@@ -9,12 +9,10 @@ const env = args[1] ? args[1].toLowerCase() : "staging";
 const keyFile = env === "prod" ? "./service-account-prod.json" : "./service-account-staging.json";
 const serviceAccount = require(keyFile);
 
+const ID_SS_BASE = "15-aMr1xLiLwP1TAQvczXMn4do2Y2zR-dm1um9KvVuFY";
+
 console.log(`\n🚀 ESPORTAZIONE [${env.toUpperCase()}]`);
 
-// --- ID SPREADSHEET DI BACKUP ---
-const ID_SS_BACKUP = "15rAkEzv4VDakmfF_91HrpxGHxOughyNhI9H-8Navs1w";
-
-// Inizializzazione Firebase
 initializeApp({ credential: cert(serviceAccount) });
 const db = getFirestore();
 
@@ -30,24 +28,17 @@ async function start() {
     });
     const sheets = google.sheets({ version: 'v4', auth });
 
-    const targets = {
-        'accounts': { ss: ID_SS_BACKUP, sheet: 'Utenti_Account', coll: 'accounts' },
-        'config': { ss: ID_SS_BACKUP, sheet: 'Config_Campi', coll: 'ui_config' },
-        'staff': { ss: ID_SS_BACKUP, sheet: 'Staff_Ruoli', coll: 'staff_roles' },
-        'access': { ss: ID_SS_BACKUP, sheet: 'Config_Accessi', coll: 'config_access' },
-        'features': { ss: ID_SS_BACKUP, sheet: 'Funzionalità', coll: 'features' }
-    };
-
+    v
     try {
         if (cmd === 'liste') {
-            await exportListe(sheets, ID_SS_BACKUP);
+            await exportListe(sheets, ID_SS_BASE);
         } else if (targets[cmd]) {
             await exportToSheet(sheets, targets[cmd]);
         } else if (cmd === 'all') {
             for (let k in targets) await exportToSheet(sheets, targets[k]);
-            await exportListe(sheets, ID_SS_BACKUP);
+            await exportListe(sheets, ID_SS_BASE);
         }
-        console.log(`\n✅ COMPLETATO!`);
+        console.log(`\n✅ ESPORTAZIONE COMPLETATA!`);
     } catch (err) { console.error("\n❌ ERRORE:", err.message); }
 }
 
@@ -62,21 +53,24 @@ async function ensureSheetExists(sheets, spreadsheetId, title) {
 }
 
 async function exportToSheet(sheets, t) {
-    console.log(`⏳ [${t.coll}] --> [${t.sheet}]...`);
+    console.log(`⏳ [${t.coll}] --> Foglio [${t.sheet}]...`);
     try {
         await ensureSheetExists(sheets, t.ss, t.sheet);
         const snapshot = await db.collection(t.coll).get();
         if (snapshot.empty) return;
+
         const docs = snapshot.docs.map(doc => ({ id_doc_firestore: doc.id, ...doc.data() }));
         const headerSet = new Set();
         docs.forEach(d => Object.keys(d).forEach(k => headerSet.add(k)));
         const headers = Array.from(headerSet);
+
         const rows = [headers, ...docs.map(d => headers.map(h => {
             let val = d[h];
             if (val === true) return "SÌ";
             if (val === false) return "NO";
             return val !== undefined ? val : "";
         }))];
+
         await sheets.spreadsheets.values.clear({ spreadsheetId: t.ss, range: `${t.sheet}!A:ZZ` });
         await sheets.spreadsheets.values.update({
             spreadsheetId: t.ss, range: `${t.sheet}!A1`,
@@ -86,7 +80,7 @@ async function exportToSheet(sheets, t) {
 }
 
 async function exportListe(sheets, spreadsheetId) {
-    const sheetName = 'Liste_Backup';
+    const sheetName = 'Liste';
     try {
         await ensureSheetExists(sheets, spreadsheetId, sheetName);
         const doc = await db.collection('settings').doc('liste_valori').get();
@@ -100,6 +94,7 @@ async function exportListe(sheets, spreadsheetId) {
             spreadsheetId, range: `${sheetName}!A1`,
             valueInputOption: 'RAW', resource: { values: rows },
         });
+        console.log(`⏳ [Liste] --> Foglio [${sheetName}]...`);
     } catch (e) { console.error(`❌ Errore Liste:`, e.message); }
 }
 
