@@ -10,6 +10,9 @@
   /* Grigio Sfondo */
   --border-grey: #dee2e6;
   --text-muted: #7f8c8d;
+  --rm-red: #a00000;
+  --rm-dark: #212529;
+  --rm-success: #2d8a4e;
 }
 
 html,
@@ -487,4 +490,259 @@ body {
 .img-doc-preview.img-invalid {
   border: 2px solid #dc3545 !important;
   background-color: #fff8f8 !important;
+}
+
+/* --- PAGAMENTI LOOK AND FEEL (COPIA IMMAGINE) --- */
+
+.cart-header-top {
+  font-size: 0.75rem;
+  /* Più sobrio */
+  padding: 8px 15px;
+}
+
+.cart-table-header {
+  background-color: #ffffff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #444;
+  text-transform: uppercase;
+  border-bottom: 2px solid #eee;
+  padding: 8px 20px;
+}
+
+.cart-row {
+  background-color: white;
+  border-bottom: 1px solid #eee;
+  padding: 15px 20px;
+  transition: background 0.2s;
+}
+
+.cart-row:hover {
+  background-color: #fcfcfc;
+}
+
+.beneficiary-name {
+  font-weight: 700;
+  font-size: 0.85rem;
+  /* Ridotto */
+  color: var(--rm-dark);
+}
+
+.beneficiary-sub {
+  font-size: 0.65rem;
+  /* Ridotto */
+}
+
+.beneficiary-sub b {
+  color: var(--rm-red);
+  text-transform: capitalize;
+}
+
+.price-big {
+  font-weight: 800;
+  font-size: 0.95rem;
+  /* Ridotto */
+}
+
+.price-listino {
+  font-size: 0.75rem;
+}
+
+/* Pulsanti Arrotondati */
+.btn-conferma {
+  background-color: var(--rm-success);
+  color: white;
+  border-radius: 50px;
+  padding: 10px 25px;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  border: none;
+}
+
+.btn-conferma:hover {
+  background-color: #246d3e;
+  color: white;
+}
+
+/* Pulsante ACQUISTA Rosso Solido */
+
+.btn-acquista {
+  background-color: #a00000 !important;
+  /* Rosso RM */
+  color: white !important;
+  border: none !important;
+  border-radius: 8px !important;
+  padding: 8px 18px !important;
+  font-weight: 700 !important;
+  font-size: 0.75rem !important;
+  text-transform: uppercase;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.btn-acquista:hover {
+  background-color: #800000 !important;
+  /* Rosso più scuro al passaggio */
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.btn-acquista:active {
+  transform: translateY(0);
+}
+
+/* Catalog Card */
+.catalog-card {
+  background: white;
+  border-radius: 15px;
+  border: 1px solid #e0e0e0;
+  padding: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.catalog-card .title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  /* Ridotto da 1.1 */
+}
+
+.catalog-card .subtitle {
+  font-size: 0.7rem;
+  /* Ridotto */
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-sconto {
+  background-color: #e8f5e9;
+  color: var(--rm-success);
+  font-size: 0.6rem;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* Stile per la descrizione nel catalogo */
+.catalog-desc {
+  font-size: 0.72rem;
+  color: #6c757d;
+  line-height: 1.2;
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  /* Limita a 2 righe per non sfasare le card */
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* --- STILE CARRELLO RIEPILOGO (LOOK IMMAGINE) --- */
+.cart-card {
+  background: white;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #e0e0e0;
+}
+
+.cart-header {
+  background-color: #212529;
+  color: white;
+  padding: 10px 20px;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.cart-header .badge {
+  background-color: #dc3545;
+  font-size: 0.7rem;
+  padding: 4px 10px;
+}
+
+.cart-table-head {
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #444;
+  text-transform: uppercase;
+  padding: 8px 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.cart-item-row {
+  padding: 12px 20px;
+  border-bottom: 1px solid #eee;
+  font-size: 0.85rem;
+}
+
+.cart-item-row .beneficiary-name {
+  font-weight: 700;
+  color: #000;
+}
+
+.cart-item-row .beneficiary-for {
+  font-size: 0.7rem;
+  color: #666;
+}
+
+.cart-item-row .beneficiary-for b {
+  color: #a00000;
+  /* Rosso Rugby Milano */
+  text-transform: uppercase;
+}
+
+.cart-item-row .price-val {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.cart-item-row .total-val {
+  font-weight: 800;
+  font-size: 1rem;
+  color: #000;
+}
+
+.btn-remove-item {
+  color: #dc3545;
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  padding: 0;
+  line-height: 1;
+}
+
+/* Footer Carrello */
+.cart-footer {
+  padding: 20px;
+  background-color: #fff;
+}
+
+.total-label {
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #666;
+  text-transform: uppercase;
+}
+
+.total-amount {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: #a00000;
+  line-height: 1;
+}
+
+.btn-conferma-procedi {
+  background-color: #2d8a4e !important;
+  color: white !important;
+  border-radius: 50px !important;
+  padding: 10px 30px !important;
+  font-weight: 700 !important;
+  font-size: 0.85rem !important;
+  text-transform: uppercase;
+  border: none !important;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }

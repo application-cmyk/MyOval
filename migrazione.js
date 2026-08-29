@@ -47,7 +47,12 @@ async function start() {
         'shop_cat': { ss: ID_SS_BASE, sheet: 'Shop_Categorie', coll: 'shop_categories', key: 'Nome Categoria' },
         'shop_art': { ss: ID_SS_BASE, sheet: 'Shop_Articoli', coll: 'shop_items', key: 'Nome Articolo' },
         'shop_tar': { ss: ID_SS_BASE, sheet: 'Shop_Tariffe', coll: 'shop_rates', key: 'ID_Tariffa' },
-        'shop_sco': { ss: ID_SS_BASE, sheet: 'Shop_Sconti', coll: 'shop_discounts', key: 'Nome_Sconto' }
+        'shop_sco': { ss: ID_SS_BASE, sheet: 'Shop_Sconti', coll: 'shop_discounts', key: 'Nome_Sconto' },
+        // PAGAMENTI
+        'payments': {
+            ss: ID_SS_BASE, sheet: 'Pagamenti', coll: 'payment_items', key: 'skuId' // <--- Deve corrispondere al nuovo nome colonna
+        }
+
     };
 
     try {

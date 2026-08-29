@@ -3,6 +3,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore"; // Aggiunti questi
 import { callGAS, formatEuro, getThumbnailUrl } from "./utils.js";
 import { renderAnagraficaForm } from "./anagrafica.js";
+import { listenToCart, addToFirestoreCart, removeFromFirestoreCart } from "./cart-service.js";
 
 // --- STATO GLOBALE ---
 window.shopCatalog = null;
@@ -37,7 +38,7 @@ async function inizializzaShop() {
     try {
         console.log("🔥 Caricamento catalogo da Firestore...");
 
-        // 1. Caricamento parallelo collezioni catalogo
+        // 1. Caricamento parallelo collezioni catalogo (Firestore)
         const [catSnap, artSnap, tarSnap, scoSnap] = await Promise.all([
             getDocs(collection(db, "shop_categories")),
             getDocs(collection(db, "shop_items")),
@@ -45,13 +46,8 @@ async function inizializzaShop() {
             getDocs(collection(db, "shop_discounts"))
         ]);
 
-        // 2. Recupero carrello persistente da GAS (Basato su Famiglia)
-        // Passiamo un oggetto per coerenza con lo standard callGAS
-        console.log("📡 Recupero carrello per famiglia:", window.globalData.idFamiglia);
-        const cartRes = await callGAS("getUserCart", { idFamiglia: window.globalData.idFamiglia });
-        const persistedCart = cartRes || [];
-
-        // 3. ARRICCHIMENTO DATI FAMIGLIA (Unione con dati Tecnici/Atleti)
+        // 2. ARRICCHIMENTO DATI FAMIGLIA (Unione con dati Tecnici/Atleti)
+        // Usiamo window.globalData che è già stato popolato in onAuthStateChanged
         const membriRaw = Array.isArray(window.globalData.famiglia?.data)
             ? window.globalData.famiglia.data
             : (window.globalData.famiglia || []);
@@ -59,11 +55,10 @@ async function inizializzaShop() {
         const membriArricchiti = membriRaw.map(m => {
             const idRaw = (m.IDContatto || m.ID_Contatto || m.idcontatto || "").toString().toLowerCase().trim();
             const datiTecnici = window.globalData.atleti[idRaw] || {};
-            // Uniamo i dati: il membro ora ha il campo Tipo (RINNOVO/NUOVO)
             return { ...m, ...datiTecnici };
         });
 
-        // 4. CREAZIONE CATALOGO GLOBALE
+        // 3. CREAZIONE CATALOGO GLOBALE
         const articoli = artSnap.docs.map(d => ({ ID_Articolo: d.id, ...d.data() }));
 
         window.shopCatalog = {
@@ -75,39 +70,51 @@ async function inizializzaShop() {
             famiglia: membriArricchiti
         };
 
-        // 5. MAPPING CARRELLO (Normalizzazione e recupero nomi)
-        console.log("📡 Dati grezzi ricevuti da GAS:", persistedCart);
+        // 4. INTEGRAZIONE CARRELLO FIRESTORE (Real-time)
+        // Sostituiamo callGAS("getUserCart") con il listener di Firestore
+        const idFamiglia = window.globalData.idFamiglia || window.globalData.famiglia?.ID_Famiglia;
 
-        window.cart = (persistedCart || []).map(item => {
-            // Usiamo i nomi delle colonne del tuo Spreadsheet (Controlla se c'è l'underscore!)
-            const idC = (item.ID_Contatto || item.id_contatto || item["ID Contatto"] || "").toString();
-            const idA = (item.ID_Articolo || item.id_articolo || item["ID Articolo"] || "").toString();
+        console.log("📡 Avvio ascolto carrello Firestore per famiglia:", idFamiglia);
 
-            const artInfo = window.shopCatalog.articoli.find(a => a.ID_Articolo === idA);
+        listenToCart(idFamiglia, (firestoreItems) => {
+            console.log("🛒 Aggiornamento carrello ricevuto da Firestore:", firestoreItems);
 
-            return {
-                idContatto: idC,
-                nomeMembro: item.Nome_Membro || item.nome_membro || item["Nome Membro"] || "",
-                idArticolo: idA,
-                nomeArticolo: artInfo ? (artInfo.Titolo_Articolo || artInfo.Nome_Articolo) : (item.Nome_Articolo || "Articolo"),
-                idCategoria: (item.ID_Categoria || item.id_categoria || "").toString(),
-                metadati: (typeof item.Metadati_JSON === 'string') ? JSON.parse(item.Metadati_JSON) : (item.Metadati_JSON || {}),
-                addedAt: item.Data_Aggiunta || Date.now(),
-                prezzoBase: 0,
-                finalPrice: 0,
-                scontiDettaglio: []
-            };
+            // Mappiamo i dati di Firestore nel formato atteso dalle funzioni di Shop.js
+            window.cart = (firestoreItems || []).map(item => {
+                const artInfo = window.shopCatalog.articoli.find(a => a.ID_Articolo === item.skuId);
+
+                return {
+                    idUnivoco: item.idUnivoco, // Necessario per la rimozione
+                    tipo: item.tipo || "ISCRIZIONE",
+                    idContatto: item.idContatto,
+                    nomeMembro: item.nomeMembro,
+                    idArticolo: item.skuId,
+                    nomeArticolo: item.nomeArticolo || (artInfo ? (artInfo.Titolo_Articolo || artInfo.Nome_Articolo) : "Articolo"),
+                    idCategoria: item.idCategoria || (artInfo ? artInfo.ID_Categoria : ""),
+                    metadati: item.metadati || {},
+                    addedAt: item.dataAggiunta || Date.now(),
+                    quantita: item.quantita || 1,
+                    // Prezzi temporanei, verranno sovrascritti da recalculateCart()
+                    prezzoBase: item.prezzoUnitario || 0,
+                    finalPrice: item.totaleRiga || 0,
+                    scontiDettaglio: []
+                };
+            });
+
+            // 5. RICALCOLO SCONTI E RE-RENDERING UI
+            // Ogni volta che Firestore cambia, ricalcoliamo gli sconti (fratelli, etc) e ridisegnamo il carrello
+            window.recalculateCart();
         });
 
-        console.log(`🛒 Carrello sincronizzato: ${window.cart.length} articoli per la famiglia.`);
-
-        // 6. Ricalcolo e Rendering
-        window.recalculateCart();
+        // 6. RENDERING CATALOGO (Home dello shop)
+        // Questo viene eseguito una sola volta all'avvio dopo il caricamento del catalogo
         window.renderShopHome();
 
     } catch (e) {
         console.error("❌ Errore critico inizializzazione Shop:", e);
-        if (typeof mostraErroreBloccante === "function") mostraErroreBloccante("Impossibile caricare il catalogo.");
+        if (typeof mostraErroreBloccante === "function") {
+            mostraErroreBloccante("Impossibile caricare il catalogo.");
+        }
     } finally {
         if (loader) loader.style.setProperty('display', 'none', 'important');
     }
@@ -123,104 +130,104 @@ window.renderCartUI = function () {
 
     if (!container) return;
 
-    // 1. Se il carrello è vuoto, nascondi tutto
-    if (!window.cart || window.cart.length === 0) {
+    // 1. Filtriamo solo le ISCRIZIONI
+    const itemsIscrizioni = (window.cart || []).filter(item => item.tipo === "ISCRIZIONE");
+
+    if (itemsIscrizioni.length === 0) {
         container.style.setProperty('display', 'none', 'important');
         if (divider) divider.classList.add('d-none');
         if (countEl) countEl.innerText = "0";
         return;
     }
 
-    // 2. Forza la visualizzazione
     container.classList.remove('d-none');
     container.style.setProperty('display', 'block', 'important');
     if (divider) divider.classList.remove('d-none');
-    if (countEl) countEl.innerText = window.cart.length;
+    if (countEl) countEl.innerText = itemsIscrizioni.length;
 
-    // 3. Calcolo Totale e Filtro Adulti
-    const total = window.cart.reduce((s, i) => s + (parseFloat(i.finalPrice) || 0), 0);
-    const membri = Array.isArray(window.shopCatalog.famiglia)
-        ? window.shopCatalog.famiglia
-        : (window.shopCatalog.famiglia?.data || []);
-
+    const total = itemsIscrizioni.reduce((s, i) => s + (parseFloat(i.finalPrice) || 0), 0);
+    const membri = Array.isArray(window.shopCatalog.famiglia) ? window.shopCatalog.famiglia : (window.shopCatalog.famiglia?.data || []);
     const adulti = membri.filter(m => {
         const r = (m.Ruolo || "").toUpperCase();
         return r.includes("GENITORE") || r.includes("SOCIO") || r.includes("CONSIGLIERE");
     });
 
-    // 4. Generazione Righe con SCONTI AL CENTRO
-    const htmlRows = window.cart.map((item, index) => {
-        // Prepariamo l'HTML degli sconti
+    // 4. Generazione Righe (Senza squadre e taglie)
+    const htmlRows = itemsIscrizioni.map((item) => {
+
+        // Lookup info dal catalogo
+        const searchId = item.skuId || item.idArticolo;
+        const artInfo = window.shopCatalog.articoli.find(a => a.ID_Articolo === searchId);
+
+        // Testi invertiti (Descrizione grassetto, Titolo grigio)
+        const testoPrincipaleBold = artInfo?.Descrizione || item.nomeArticolo;
+        const sottotitoloItalic = artInfo ? (artInfo.Titolo_Articolo || artInfo.Nome_Articolo) : "";
+
+        // HTML Sconti
         const sctHtml = (item.scontiDettaglio || []).map(s => `
             <div class="text-success fw-bold text-nowrap" style="font-size: 9px;">
                 <i class="fas fa-tag"></i> -${formatEuro(s.valore)}
                 <div class="text-muted" style="font-size: 7px; font-weight: normal;">${s.nome}</div>
             </div>`).join('');
 
-        let metaHtml = "";
-        if (item.metadati) {
-            if (item.metadati.squadra) metaHtml += `<span class="badge bg-light text-dark border me-1" style="font-size: 8px;">${item.metadati.squadra}</span>`;
-            if (item.metadati.tagliaMaglia) metaHtml += `<small class="text-muted" style="font-size: 9px;">Kit: ${item.metadati.tagliaMaglia}</small>`;
-        }
-
         return `
         <tr style="border-bottom: 1px solid #f0f0f0;">
-            <!-- Colonna 1: Articolo e Beneficiario -->
-            <td class="ps-3 py-2" style="width: 40%;">
-                <div class="fw-bold text-dark" style="font-size:13px; line-height: 1.1;">${item.nomeArticolo}</div>
-                <div style="font-size:10px;">Per: <span class="text-danger fw-bold">${item.nomeMembro}</span></div>
-                <div class="mt-1">${metaHtml}</div>
+            <td class="ps-3 py-2" style="width: 45%;">
+                <!-- Descrizione Articolo -->
+                <div class="fw-bold text-dark" style="font-size:13px; line-height: 1.1;">${testoPrincipaleBold}</div>
+                
+                <!-- Codice/Titolo tecnico -->
+                ${sottotitoloItalic ? `<div class="text-muted mb-1" style="font-size: 9px; font-style: italic; line-height: 1;">${sottotitoloItalic}</div>` : ''}
+                
+                <!-- Beneficiario -->
+                <div style="font-size:10px; margin-top: 2px;">Per: <span class="text-danger fw-bold">${item.nomeMembro}</span></div>
             </td>
-
-            <!-- Colonna 2: Prezzo Base (nascosto su mobile piccolo) -->
             <td class="text-center text-muted d-none d-md-table-cell" style="font-size:11px; width: 15%;">
                 ${formatEuro(item.prezzoBase)}
             </td>
-
-            <!-- Colonna 3: SCONTI (AL CENTRO) -->
-            <td class="text-center py-2" style="width: 25%;">
+            <td class="text-center py-2" style="width: 20%;">
                 ${sctHtml || '<span class="text-muted" style="font-size: 10px;">-</span>'}
             </td>
-
-            <!-- Colonna 4: Prezzo Finale -->
             <td class="text-end py-2 pe-3" style="width: 15%;">
                 <div class="fw-bold text-dark" style="font-size:0.95rem;">${formatEuro(item.finalPrice)}</div>
             </td>
-
-            <!-- Colonna 5: Azione -->
             <td class="text-center" style="width: 5%;">
-                <button class="btn btn-sm btn-link text-danger p-0" onclick="window.removeAndRefresh(${index})">
+                <button class="btn btn-sm btn-link text-danger p-0" onclick="window.removeAndRefresh('${item.idUnivoco}')">
                     <i class="fas fa-times-circle"></i>
                 </button>
             </td>
         </tr>`;
     }).join('');
 
-    // 5. Iniezione HTML Finale (Con Intestazioni Sottili per chiarezza colonne)
+    // 5. Iniezione HTML Finale (con Table Header fisso)
     container.innerHTML = `
     <div class="card shadow-sm mb-3" style="border-radius: 12px; overflow: hidden; border: 1px solid #ddd;">
-      
       <div class="p-2 bg-dark text-white d-flex justify-content-between align-items-center">
         <h6 class="mb-0 fw-bold small ms-2"><i class="fas fa-shopping-cart me-2 text-danger"></i>RIEPILOGO ISCRIZIONE</h6>
-        <span class="badge bg-danger rounded-pill me-2" style="font-size:10px;">${window.cart.length} Articoli</span>
+        <span class="badge bg-danger rounded-pill me-2" style="font-size:10px;">${itemsIscrizioni.length} Articoli</span>
       </div>
-      
       <div class="table-responsive bg-white">
         <table class="table table-hover align-middle mb-0" style="table-layout: fixed; width: 100%;">
           <thead class="bg-light">
             <tr style="font-size: 9px; text-transform: uppercase; color: #999; border-bottom: 1px solid #eee;">
-               <th class="ps-3 py-1">Beneficiario</th>
-               <th class="text-center py-1 d-none d-md-table-cell">Listino</th>
-               <th class="text-center py-1">Sconti</th>
-               <th class="text-end pe-3 py-1">Totale</th>
+               <th class="ps-3 py-1" style="width: 45%;">Beneficiario</th>
+               <th class="text-center py-1 d-none d-md-table-cell" style="width: 15%;">Listino</th>
+               <th class="text-center py-1" style="width: 20%;">Sconti</th>
+               <th class="text-end pe-3 py-1" style="width: 15%;">Totale</th>
                <th style="width: 40px;"></th>
             </tr>
           </thead>
           <tbody>${htmlRows}</tbody>
         </table>
       </div>
+      <!-- Footer (Coupon e Checkout) -->
+      ${renderCartFooter(total, adulti)} 
+    </div>`;
+};
 
-      <!-- Area Coupon e Detrazione -->
+// Funzione di supporto per pulire il codice del footer
+function renderCartFooter(total, adulti) {
+    return `
       <div class="p-2 bg-white border-top">
         <div class="row g-2 align-items-center">
           <div class="col-md-5">
@@ -232,10 +239,7 @@ window.renderCartUI = function () {
           </div>
           <div class="col-md-7 border-start ps-3">
             <div class="form-check form-switch m-0 d-flex align-items-center">
-                <input class="form-check-input" type="checkbox" id="f_detrazione_attiva" 
-                       onchange="window.toggleDetrazioneUI(this.checked)" 
-                       ${window.isDetrazioneActive ? 'checked' : ''} 
-                       style="transform: scale(0.85); margin-right: 10px;">
+                <input class="form-check-input" type="checkbox" id="f_detrazione_attiva" onchange="window.toggleDetrazioneUI(this.checked)" ${window.isDetrazioneActive ? 'checked' : ''} style="transform: scale(0.85); margin-right: 10px;">
                 <label class="form-check-label fw-bold text-dark" for="f_detrazione_attiva" style="font-size: 11px;">Detrazione fiscale (730)</label>
             </div>
             <div id="detrazione-fields-ui" class="${window.isDetrazioneActive ? '' : 'd-none'} mt-1">
@@ -247,25 +251,38 @@ window.renderCartUI = function () {
           </div>
         </div>
       </div>
-
       <div class="p-2 bg-light border-top d-flex justify-content-between align-items-center">
         <div class="ps-2">
-            <small class="text-muted text-uppercase fw-bold d-block" style="font-size:9px; line-height: 1;">Totale da pagare:</small>
-            <div class="h4 fw-bold text-danger mb-0" style="font-family: monospace;">${formatEuro(total)}</div>
+            <small class="text-muted text-uppercase fw-bold d-block" style="font-size:9px; line-height: 1;">Totale iscrizioni:</small>
+            <div class="h4 fw-bold text-danger mb-0">${formatEuro(total)}</div>
         </div>
-        <button class="btn btn-success fw-bold px-4 py-2 rounded-pill shadow-sm" style="font-size: 11px; letter-spacing: 0.5px;" onclick="window.checkout()">
+        <button class="btn btn-success fw-bold px-4 py-2 rounded-pill shadow-sm" style="font-size: 11px;" onclick="window.checkout()">
           CONFERMA E PROCEDI <i class="fas fa-arrow-right ms-1"></i>
         </button>
-      </div>
-    </div>`;
-};
+      </div>`;
+}
 
 window.updateCartUI = function () {
-    const total = window.cart.reduce((s, i) => s + (i.finalPrice || 0), 0);
-    const countEl = document.getElementById('cart-count');
-    if (countEl) countEl.innerText = window.cart.length;
-};
+    // 1. Filtriamo il carrello globale per ottenere solo le Iscrizioni
+    const itemsIscrizioni = (window.cart || []).filter(item => item.tipo === "ISCRIZIONE");
 
+    // 2. Calcolo del totale (basato sui prezzi ricalcolati)
+    const total = itemsIscrizioni.reduce((s, i) => s + (parseFloat(i.finalPrice) || 0), 0);
+
+    // 3. Aggiorna il badge numerico del carrello (quello in alto a destra nell'icona)
+    const countEl = document.getElementById('cart-count');
+    if (countEl) {
+        countEl.innerText = itemsIscrizioni.length;
+    }
+
+    // 4. Se la funzione di rendering della tabella esiste, la chiamiamo
+    // per aggiornare la visualizzazione del carrello integrato
+    if (typeof window.renderCartUI === "function") {
+        window.renderCartUI();
+    }
+
+    console.log(`📊 UI Shop aggiornata: ${itemsIscrizioni.length} iscrizioni nel modulo.`);
+};
 
 window.openShopCategory = function (idCat) {
     if (!window.shopCatalog) return;
@@ -353,8 +370,9 @@ window.openShopCategory = function (idCat) {
                 <div class="card product-row-card shadow-sm" style="${!lp.isValid ? 'opacity:0.6' : ''}">
                     <div class="row align-items-center g-2">
                         <div class="col-7 ps-2">
+                            <!-- MODIFICATO: Priorità alla Descrizione, poi Titolo, poi Nome -->
                             <h6 class="fw-bold mb-0" style="font-size:1rem; color:#1a2b3c;">
-                                ${art.Titolo_Articolo || art.Nome_Articolo}
+                                ${art.Descrizione || art.Titolo_Articolo || art.Nome_Articolo}
                             </h6>
                             <div class="nati-info" style="font-size: 0.75rem; color: #6c757d;">
                                 <i class="far fa-calendar-alt me-1"></i> ${natiString}
@@ -420,18 +438,33 @@ window.applyCoupon = function () {
 };
 
 
-window.removeAndRefresh = async function (index) {
-    const item = window.cart[index];
-    if (!item || !confirm("Rimuovere l'articolo?")) return;
+window.removeAndRefresh = async function (idUnivoco) {
+    // 1. Chiedi conferma all'utente
+    if (!idUnivoco || !confirm("Sei sicuro di voler rimuovere questo articolo?")) return;
+
+    // 2. Recupera l'ID Famiglia
+    const idFam = window.globalData.idFamiglia || window.globalData.famiglia?.ID_Famiglia;
+
+    if (!idFam) {
+        console.error("❌ ID Famiglia non trovato in window.globalData");
+        alert("Errore: sessione scaduta, ricarica la pagina.");
+        return;
+    }
+
     try {
-        await callGAS("removeFromCartPersist", {
-            idFamiglia: window.globalData.idFamiglia,
-            idContatto: item.idContatto,
-            idArticolo: item.idArticolo
-        });
-        window.cart.splice(index, 1);
-        window.recalculateCart();
-    } catch (e) { alert(e.message); }
+        console.log("🗑️ Rimozione articolo da Firestore:", idUnivoco);
+
+        // 3. Chiama il servizio Firestore (rimuove l'oggetto dall'array items)
+        await removeFromFirestoreCart(idFam, idUnivoco);
+
+        // NOTA: Non serve chiamare window.recalculateCart() o renderCartUI() manualmente.
+        // Poiché in inizializzaShop abbiamo attivato listenToCart, Firestore
+        // avviserà l'app del cambiamento e la UI si aggiornerà da sola in tempo reale.
+
+    } catch (e) {
+        console.error("❌ Errore durante la rimozione:", e);
+        alert("Impossibile rimuovere l'articolo: " + e.message);
+    }
 };
 
 /**
@@ -568,7 +601,10 @@ window.startConfigurator = function (idArt) {
 
     // Visualizzazione Titolo
     const titleEl = document.getElementById('conf-titolo-articolo');
-    if (titleEl) titleEl.innerText = (art.Titolo_Articolo || art.Nome_Articolo).toUpperCase();
+    if (titleEl) {
+        const nomeDaMostrare = art.Descrizione || art.Titolo_Articolo || art.Nome_Articolo;
+        titleEl.innerText = nomeDaMostrare.toUpperCase();
+    }
 
     // Visualizzazione Prezzo
     const priceEl = document.getElementById('conf-display-prezzo');
@@ -746,12 +782,15 @@ window.calculateLivePrice = function (art) {
 window.recalculateCart = function () {
     if (!window.cart || window.cart.length === 0) {
         window.appliedCouponCode = "";
-        window.renderCartUI(); // Pulisce la UI
+        window.renderCartUI();
         return;
     }
 
-    // 1. Reset prezzi base dagli articoli del catalogo
-    window.cart.forEach(item => {
+    // --- FILTRIAMO SOLO LE ISCRIZIONI PER IL CALCOLO SCONTI ---
+    const inscriptions = window.cart.filter(i => i.tipo === "ISCRIZIONE");
+
+    // Reset prezzi solo per le iscrizioni
+    inscriptions.forEach(item => {
         const artInfo = window.shopCatalog.articoli.find(a => a.ID_Articolo === item.idArticolo);
         if (artInfo) {
             const priceData = window.calculateLivePrice(artInfo);
@@ -815,8 +854,8 @@ window.addToCart = async function () {
     }
 
     try {
-        const itemsToAdd = [];
-        const membri = window.shopCatalog.famiglia; // Già arricchiti in inizializzaShop
+        const idFam = window.globalData.idFamiglia || window.globalData.famiglia?.ID_Famiglia;
+        const membri = window.shopCatalog.famiglia;
 
         for (const cb of checks) {
             const idC = cb.value;
@@ -825,10 +864,11 @@ window.addToCart = async function () {
 
             const memberRef = membri.find(f => (f.IDContatto || f.id_contatto || "").toString() === idC.toString());
 
+            // --- 1. VALIDAZIONE E RACCOLTA DATI FORM ---
             const fields = containerMembro.querySelectorAll('.val-field');
             const updatePayload = {
                 idContatto: idC,
-                ID_Famiglia: window.globalData.idFamiglia
+                ID_Famiglia: idFam
             };
             const metaData = {};
 
@@ -854,58 +894,54 @@ window.addToCart = async function () {
                 return;
             }
 
-            // 1. SALVATAGGIO ANAGRAFICA (GAS)
-            console.log(`📤 Invio dati anagrafici a GAS per ${idC}...`);
+            // --- 2. SALVATAGGIO ANAGRAFICA SU GOOGLE SHEETS (GAS) ---
+            // Questo passaggio rimane perché aggiorna il database master anagrafico
+            console.log(`📤 Sincronizzazione anagrafica GAS per ${idC}...`);
             await callGAS("salvaDatiMembro", { payload: updatePayload });
 
-            // 2. AGGIORNAMENTO MEMORIA LOCALE (RAM)
+            // Aggiornamento memoria locale
             if (memberRef) {
                 Object.assign(memberRef, updatePayload);
                 const idCLow = idC.toLowerCase().trim();
                 if (window.globalData.atleti[idCLow]) Object.assign(window.globalData.atleti[idCLow], updatePayload);
             }
 
-            // 3. PREPARAZIONE OGGETTO PER CARRELLO
-            itemsToAdd.push({
-                idFamiglia: window.globalData.idFamiglia, // <--- CAMPO CHIAVE
-                email: window.globalData.userEmail,
+            // --- 3. PREPARAZIONE E INVIO ARTICOLO A FIRESTORE ---
+            const priceData = window.calculateLivePrice(art);
+
+            const itemFirestore = {
+                tipo: "ISCRIZIONE", // Identificatore per logiche differenziate
                 idContatto: idC.toString(),
                 nomeMembro: memberRef ? `${memberRef.Nome} ${memberRef.Cognome}` : "Socio",
-                idArticolo: art.ID_Articolo.toString(),
+                skuId: art.ID_Articolo.toString(),
                 idCategoria: art.ID_Categoria,
                 nomeArticolo: art.Titolo_Articolo || art.Nome_Articolo,
-                prezzoBase: window.calculateLivePrice(art).price,
-                metadati: metaData
-            });
+                prezzoUnitario: parseFloat(priceData.price),
+                quantita: 1,
+                totaleRiga: parseFloat(priceData.price),
+                metadati: metaData, // Conserviamo taglie, squadre, etc.
+                dataAggiunta: new Date().toISOString(),
+                emailInserimento: auth.currentUser.email
+            };
+
+            console.log(`📤 Aggiunta ${itemFirestore.nomeArticolo} al carrello Firestore...`);
+            await addToFirestoreCart(idFam, itemFirestore);
         }
 
-        // 4. AGGIORNAMENTO CARRELLO SPREADSHEET (GAS)
-        console.log("📤 Invio articoli al carrello della famiglia...");
-        // Usiamo Promise.all per inviare tutti i membri selezionati
-        await Promise.all(itemsToAdd.map(item => callGAS("addToCartPersist", item)));
+        // --- 4. CHIUSURA E FEEDBACK ---
+        // Nota: Non serve aggiornare window.cart o chiamare renderCartUI qui.
+        // Il listener 'listenToCart' in inizializzaShop lo farà automaticamente 
+        // non appena Firestore conferma la scrittura.
 
-        // 5. AGGIORNAMENTO UI LOCALE
-        itemsToAdd.forEach(item => {
-            window.cart.push({
-                ...item,
-                finalPrice: item.prezzoBase,
-                scontiDettaglio: [],
-                addedAt: Date.now()
-            });
-        });
-
-        window.recalculateCart();
-        window.renderCartUI();
-
-        // 6. CHIUSURA
         const modal = bootstrap.Modal.getInstance(document.getElementById('modalConfiguratore'));
         if (modal) modal.hide();
 
-        alert("✅ Iscrizioni aggiunte al carrello!");
+        // Piccolo trucco: resettiamo il configuratore per il prossimo utilizzo
+        document.querySelectorAll('.conf-membro-check').forEach(c => c.checked = false);
 
     } catch (e) {
         console.error("❌ Errore critico addToCart:", e);
-        alert("Si è verificato un errore: " + e.message);
+        alert("Si è verificato un errore durante l'aggiunta al carrello: " + e.message);
     } finally {
         if (loader) loader.style.display = 'none';
     }
