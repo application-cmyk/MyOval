@@ -1,6 +1,6 @@
-import { db } from "./firebase-config.js";
+import { db, APP_ENV } from "./firebase-config.js"; // <--- AGGIUNGI APP_ENV QUI
 import { doc, getDoc, collection, getDocs, query, where } from "firebase/firestore";
-import { resolveUrlParams } from "./utils.js"; 
+import { resolveUrlParams } from "./utils.js";
 
 /**
  * Inizializzazione Dashboard Gestionale Staff
@@ -10,10 +10,11 @@ export async function initGestionale(user) {
     if (!container) return;
 
     const email = user.email.toLowerCase().trim();
-    
+
     // --- 1. INIZIALIZZAZIONE DATI GLOBALI STAFF ---
     window.globalData = {
         userEmail: email,
+        environment: APP_ENV,
         idFamiglia: "", // Può essere popolato in seguito se necessario
         currentMemberIndex: 0,
         famiglia: { data: [] }
@@ -24,7 +25,7 @@ export async function initGestionale(user) {
     try {
         // --- 2. RECUPERO GRUPPO DA STAFF_ROLES ---
         const roleSnap = await getDoc(doc(db, "staff_roles", email));
-        
+
         if (!roleSnap.exists()) {
             console.error("❌ Email non trovata in staff_roles");
             container.innerHTML = `<div class="alert alert-danger m-5 shadow-sm" style="border-radius:15px;">
@@ -36,7 +37,7 @@ export async function initGestionale(user) {
         const roleData = roleSnap.data();
         const userGroup = (roleData.Gruppo || roleData.Ruolo || "GUEST").toUpperCase();
         window.globalData.userGroup = userGroup;
-        
+
         document.getElementById('staff-role-label').innerText = `Profilo: ${userGroup}`;
         document.getElementById('staff-email-display').innerText = email;
 
@@ -44,7 +45,7 @@ export async function initGestionale(user) {
         // Cerchiamo le funzioni assegnate al Gruppo specifico o a "ALL"
         const qAccess = query(collection(db, "config_access"), where("Gruppo", "in", [userGroup, "ALL"]));
         const accessSnap = await getDocs(qAccess);
-        
+
         const accessMapping = {}; // Mappa Funzione -> Ordine (da config_access)
         accessSnap.forEach(docSnap => {
             const d = docSnap.data();
@@ -72,17 +73,17 @@ export async function initGestionale(user) {
             if (accessMapping[fId] !== undefined) {
                 const area = f.Area || "VARIE";
                 const sottoArea = f.Sotto_Area || "Generale";
-                
+
                 if (!structure[area]) {
-                    structure[area] = { 
-                        ordineArea: parseInt(f.Area_Ordine) || 999, 
-                        content: {} 
+                    structure[area] = {
+                        ordineArea: parseInt(f.Area_Ordine) || 999,
+                        content: {}
                     };
                 }
                 if (!structure[area].content[sottoArea]) {
                     structure[area].content[sottoArea] = [];
                 }
-                
+
                 structure[area].content[sottoArea].push({
                     id: docSnap.id,
                     nome: f.Nome || docSnap.id,
@@ -91,7 +92,7 @@ export async function initGestionale(user) {
                     tipo: (f.Tipo || "IFRAME").toUpperCase(),
                     target: f.Target || "_self",
                     // ORDINE PRESO DALLA TABELLA ACCESSI
-                    ordineInGroup: accessMapping[fId] 
+                    ordineInGroup: accessMapping[fId]
                 });
             }
         });
@@ -107,13 +108,13 @@ export async function initGestionale(user) {
 
 function renderGestionaleUI(structure) {
     const container = document.getElementById('gestionale-menu-container');
-    
+
     // Ordiniamo le card delle Aree in base a 'ordineArea' (da features)
     const sortedAreas = Object.keys(structure).sort((a, b) => structure[a].ordineArea - structure[b].ordineArea);
 
     container.innerHTML = sortedAreas.map(areaName => {
         const areaData = structure[areaName];
-        
+
         return `
             <div class="col-md-6 col-xl-4 animate__animated animate__fadeIn">
                 <div class="card h-100 shadow-sm border-0" style="border-radius: 20px; overflow: hidden;">
@@ -128,8 +129,8 @@ function renderGestionaleUI(structure) {
                                 <small class="text-muted fw-bold text-uppercase d-block mb-2" style="font-size: 9px; opacity: 0.6; letter-spacing: 0.5px;">${sottoArea}</small>
                                 <div class="list-group list-group-flush">
                                     ${areaData.content[sottoArea]
-                                        .sort((a, b) => a.ordineInGroup - b.ordineInGroup) // <--- ORDINAMENTO PER CONFIG_ACCESSI
-                                        .map(func => `
+                .sort((a, b) => a.ordineInGroup - b.ordineInGroup) // <--- ORDINAMENTO PER CONFIG_ACCESSI
+                .map(func => `
                                         <button class="list-group-item list-group-item-action border-0 px-2 py-3 d-flex align-items-center mb-1" 
                                                 onclick="window.lanciaAppStaff('${func.link}', '${func.tipo}', '${func.nome}', '${func.target}')"
                                                 style="border-radius: 12px;">
@@ -155,27 +156,30 @@ function renderGestionaleUI(structure) {
 window.lanciaAppStaff = (link, tipo, titolo, target) => {
     if (!link) return;
 
-    // Recuperiamo i dati per i segnaposto dalla sessione corrente
     const params = {
         email: window.globalData.userEmail,
-        idFamiglia: window.globalData.idFamiglia || "" 
-        // Nota: nel gestionale <CONTATTO> sarà gestito in seguito se apri una scheda specifica
+        idFamiglia: window.globalData.idFamiglia || ""
     };
 
-    // Risoluzione dei segnaposto (es: <EMAIL>)
-    const finalUrl = resolveUrlParams(link, params);
+    // 1. Risolviamo i parametri classici (<EMAIL>, ecc)
+    let finalUrl = resolveUrlParams(link, params);
 
-    console.log(`🚀 Lancio Staff: ${titolo} | URL: ${finalUrl}`);
+    // 2. Aggiungiamo l'ambiente recuperato da globalData (o direttamente da APP_ENV)
+    const env = window.globalData.environment || "staging";
+
+    // Controlla se l'URL contiene già un '?'
+    const separator = finalUrl.includes('?') ? '&' : '?';
+    finalUrl = `${finalUrl}${separator}Env=${env}`;
+
+    console.log(`🚀 Lancio [${env}]: ${titolo} -> ${finalUrl}`);
 
     if (target === "_blank" || tipo === "EXTERNAL") {
         window.open(finalUrl, '_blank');
     } else {
         const view = document.getElementById('gestionale-iframe-view');
         const iframe = document.getElementById('gestionale-iframe');
-        const titleLabel = document.getElementById('gestionale-iframe-title');
-        
         if (view && iframe) {
-            if (titleLabel) titleLabel.innerText = titolo;
+            document.getElementById('gestionale-iframe-title').innerText = titolo;
             view.classList.remove('d-none');
             iframe.src = finalUrl;
         }

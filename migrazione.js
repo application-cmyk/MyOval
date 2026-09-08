@@ -7,10 +7,15 @@ const cmd = args[0] ? args[0].toLowerCase() : null;
 const env = args[1] ? args[1].toLowerCase() : "staging";
 const isClean = args[2] ? args[2].toLowerCase() === 'clean' : false;
 
+// 1. DIVERSIFICAZIONE FILE SERVICE ACCOUNT
 const keyFile = env === "prod" ? "./service-account-prod.json" : "./service-account-staging.json";
 const serviceAccount = require(keyFile);
 
-const ID_SS_BASE = "15-aMr1xLiLwP1TAQvczXMn4do2Y2zR-dm1um9KvVuFY";
+// 2. DIVERSIFICAZIONE SPREADSHEET ID
+const ID_SS_STAGING = "1FnMM8dOJ_qzbjw9TOVIrEhlOqiUrFAR6tMIb12LeW-E";
+const ID_SS_PROD = "1_SZlQtpiRQhTsQEvFCCkCE3ODzQNrhPbIV7yzntqFT8"; // <--- Cambialo!
+
+const ID_SS_BASE = env === "prod" ? ID_SS_PROD : ID_SS_STAGING;
 
 initializeApp({ credential: cert(serviceAccount) });
 const db = getFirestore();

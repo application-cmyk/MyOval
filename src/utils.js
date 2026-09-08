@@ -1,4 +1,6 @@
-const GAS_URL = "https://script.google.com/macros/s/AKfycbwZmL398hpN54AA2myDsty2u5mSANmTLpQUxrKyBWwP1zRXLng2ZgRJoQMIsy8p_fA8Xw/exec";
+import { APP_ENV } from "./firebase-config.js";
+
+const GAS_URL = "https://script.google.com/macros/s/AKfycbyt5jq-GUb98_V5crrCBhZt4OQzaRxsrOf86cj-c3x-sGnhLgPUam4IhbEaFj5dBEExQg/exec";
 
 export function formattaDataRugby(val) {
     if (!val || val === "" || val === "null" || val === undefined) return "-";
@@ -28,12 +30,20 @@ export function formatEuro(v) {
  */
 export async function callGAS(action, params = {}) {
     try {
-        console.log(`📡 Chiamata Bridge [POST]: ${action}`);
+        // Usiamo APP_ENV importato per sapere dove siamo
+        const currentEnv = APP_ENV || "staging";
+
+        console.log(`📡 Chiamata Bridge [POST] [${currentEnv}]: ${action}`);
 
         const response = await fetch(GAS_URL, {
             method: 'POST',
             mode: 'cors',
-            body: JSON.stringify({ action, params })
+            // 2. Aggiungiamo l'ambiente nel body inviato a GAS
+            body: JSON.stringify({
+                action,
+                env: currentEnv, // <--- Passiamo l'ambiente a GAS
+                params
+            })
         });
 
         if (!response.ok) throw new Error("Errore di rete verso Apps Script");
@@ -83,11 +93,11 @@ export function resolveUrlParams(url, data = {}) {
     const replacements = {
         "<EMAIL>": encodeURIComponent(data.email || ""),
         "<FAMIGLIA>": encodeURIComponent(data.idFamiglia || ""),
-        "<CONTATTO>": encodeURIComponent(data.idContatto || "")
+        "<CONTATTO>": encodeURIComponent(data.idContatto || ""),
+        "<ENV>": encodeURIComponent(APP_ENV) // <--- Utile se vuoi usarlo nei link del DB
     };
 
     for (const [placeholder, value] of Object.entries(replacements)) {
-        // Sostituisce tutte le occorrenze del segnaposto
         resolvedUrl = resolvedUrl.split(placeholder).join(value);
     }
 

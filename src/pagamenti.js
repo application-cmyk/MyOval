@@ -3,6 +3,8 @@ import { onAuthStateChanged } from "firebase/auth";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { addToFirestoreCart, removeFromFirestoreCart, listenToCart } from "./cart-service.js";
 import { safeSet } from "./utils.js";
+import { initPaypalCheckout } from "./checkout-service.js";
+import { checkSandboxMode } from "./paypal-config.js"; // Importa la funzione
 
 let sharedData = null;
 let currentCartItems = [];
@@ -33,6 +35,9 @@ onAuthStateChanged(auth, async (user) => {
 
         // 3. Disegna Bolle
         renderFamilySelector();
+
+        checkSandboxMode();
+
     } else {
         window.location.href = "index.html";
     }
@@ -188,23 +193,24 @@ function updateCartUI() {
     const rowsContainer = document.getElementById('cart-rows-container');
     const totalDisp = document.getElementById('cart-total-display');
     const countBadge = document.getElementById('cart-items-badge');
+    const paypalContainerId = 'paypal-button-container';
 
     if (!container || !rowsContainer) return;
 
-    // --- FILTRO: Consideriamo solo gli articoli di tipo PAGAMENTO ---
+    // --- 1. FILTRO: Consideriamo solo gli articoli di tipo PAGAMENTO ---
     const itemsPagamenti = (currentCartItems || []).filter(item => item.tipo === "PAGAMENTO");
 
     if (itemsPagamenti.length > 0) {
-        // Mostriamo il carrello dei pagamenti
+        // Visualizzazione contenitore
         container.classList.remove('d-none');
         container.style.display = 'block';
 
-        // Badge con il numero di pagamenti (escluse iscrizioni)
+        // Badge contatore (solo pagamenti)
         if (countBadge) {
             countBadge.innerText = `${itemsPagamenti.length} Articol${itemsPagamenti.length > 1 ? 'i' : 'o'}`;
         }
 
-        // Generiamo le righe della tabella solo per i pagamenti
+        // --- 2. GENERAZIONE RIGHE TABELLA ---
         rowsContainer.innerHTML = itemsPagamenti.map((item) => {
             const displayQty = item.quantita > 1 ?
                 `<span class="badge bg-light text-dark border ms-1" style="font-size:0.6rem; vertical-align: middle;">x${item.quantita}</span>` : '';
@@ -237,7 +243,7 @@ function updateCartUI() {
             `;
         }).join('');
 
-        // --- CALCOLO TOTALE SOLO PAGAMENTI ---
+        // --- 3. CALCOLO TOTALE E FORMATTAZIONE ---
         const total = itemsPagamenti.reduce((sum, item) => sum + item.totaleRiga, 0);
 
         totalDisp.innerText = total.toLocaleString('it-IT', {
@@ -246,21 +252,53 @@ function updateCartUI() {
             minimumFractionDigits: 2
         });
 
-        // Inizializzazione PayPal se non presente
-        if (typeof renderPayPal === "function" && !paypalRendered) {
-            setTimeout(renderPayPal, 100);
+        // --- 4. INIZIALIZZAZIONE PAYPAL (UNIFICATO) ---
+        // Passiamo gli articoli filtrati al servizio checkout
+        if (!paypalRendered) {
+            paypalRendered = true;
+
+            // Recuperiamo l'ID Famiglia e l'Email per la finalizzazione
+            const idFam = sharedData.idFamiglia || sharedData.famiglia?.ID_Famiglia;
+            const email = auth.currentUser.email;
+
+            initPaypalCheckout(
+                paypalContainerId,
+                itemsPagamenti,
+                idFam,
+                email,
+                (details) => {
+                    // Callback di successo
+                    alert("Pagamento completato con successo! 🎉");
+                    // Eventuale redirect o pulizia UI locale
+                    container.classList.add('d-none');
+                }
+            );
         }
     } else {
-        // Se non ci sono pagamenti (anche se ci sono iscrizioni), nascondiamo questo carrello
+        // Carrello vuoto o senza pagamenti
         container.classList.add('d-none');
         container.style.display = 'none';
+
+        // Reset flag per permettere il re-rendering se l'utente aggiunge di nuovo articoli
         paypalRendered = false;
+        const ppBox = document.getElementById(paypalContainerId);
+        if (ppBox) ppBox.innerHTML = '';
     }
 }
 
-window.clearCart = () => {
-    cart = [];
-    updateCartUI();
+/**
+ * Svuota il carrello agendo su Firestore (Unificato)
+ */
+window.clearCart = async () => {
+    if (!confirm("Sei sicuro di voler svuotare il carrello?")) return;
+
+    const idFam = sharedData.idFamiglia || sharedData.famiglia?.ID_Famiglia;
+    try {
+        await clearFirestoreCart(idFam);
+        // La UI si aggiornerà da sola grazie al listener onSnapshot
+    } catch (err) {
+        console.error("Errore svuotamento carrello:", err);
+    }
 };
 
 

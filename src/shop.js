@@ -4,6 +4,8 @@ import { collection, getDocs, doc, getDoc } from "firebase/firestore"; // Aggiun
 import { callGAS, formatEuro, getThumbnailUrl } from "./utils.js";
 import { renderAnagraficaForm } from "./anagrafica.js";
 import { listenToCart, addToFirestoreCart, removeFromFirestoreCart } from "./cart-service.js";
+import { initPaypalCheckout, processBankTransferCheckout } from "./checkout-service.js";
+import { checkSandboxMode } from "./paypal-config.js";
 
 // --- STATO GLOBALE ---
 window.shopCatalog = null;
@@ -15,6 +17,8 @@ window.isDetrazioneActive = false;
 window.selectedGenitoreId = "";
 window.fiscalCF = "";
 window.fiscalEmail = "";
+// Flag per evitare doppie inizializzazioni PayPal in questa pagina
+let shopPaypalRendered = false;
 
 onAuthStateChanged(auth, async (user) => {
     if (user) {
@@ -26,6 +30,8 @@ onAuthStateChanged(auth, async (user) => {
         if (emailLabel) emailLabel.innerText = window.globalData.userEmail;
 
         await inizializzaShop();
+
+        checkSandboxMode();
     } else {
         window.location.href = "index.html";
     }
@@ -133,6 +139,9 @@ window.renderCartUI = function () {
     // 1. Filtriamo solo le ISCRIZIONI
     const itemsIscrizioni = (window.cart || []).filter(item => item.tipo === "ISCRIZIONE");
 
+    // RESET DEL FLAG: Ogni volta che ridisegnamo la UI, i vecchi bottoni spariscono
+    shopPaypalRendered = false;
+
     if (itemsIscrizioni.length === 0) {
         container.style.setProperty('display', 'none', 'important');
         if (divider) divider.classList.add('d-none');
@@ -140,11 +149,7 @@ window.renderCartUI = function () {
         return;
     }
 
-    container.classList.remove('d-none');
-    container.style.setProperty('display', 'block', 'important');
-    if (divider) divider.classList.remove('d-none');
-    if (countEl) countEl.innerText = itemsIscrizioni.length;
-
+    // ... (Logica calcolo totale e adulti invariata) ...
     const total = itemsIscrizioni.reduce((s, i) => s + (parseFloat(i.finalPrice) || 0), 0);
     const membri = Array.isArray(window.shopCatalog.famiglia) ? window.shopCatalog.famiglia : (window.shopCatalog.famiglia?.data || []);
     const adulti = membri.filter(m => {
@@ -152,54 +157,31 @@ window.renderCartUI = function () {
         return r.includes("GENITORE") || r.includes("SOCIO") || r.includes("CONSIGLIERE");
     });
 
-    // 4. Generazione Righe (Senza squadre e taglie)
+    // ... (Generazione htmlRows invariata) ...
     const htmlRows = itemsIscrizioni.map((item) => {
-
-        // Lookup info dal catalogo
         const searchId = item.skuId || item.idArticolo;
         const artInfo = window.shopCatalog.articoli.find(a => a.ID_Articolo === searchId);
-
-        // Testi invertiti (Descrizione grassetto, Titolo grigio)
         const testoPrincipaleBold = artInfo?.Descrizione || item.nomeArticolo;
         const sottotitoloItalic = artInfo ? (artInfo.Titolo_Articolo || artInfo.Nome_Articolo) : "";
-
-        // HTML Sconti
-        const sctHtml = (item.scontiDettaglio || []).map(s => `
-            <div class="text-success fw-bold text-nowrap" style="font-size: 9px;">
-                <i class="fas fa-tag"></i> -${formatEuro(s.valore)}
-                <div class="text-muted" style="font-size: 7px; font-weight: normal;">${s.nome}</div>
-            </div>`).join('');
+        const sctHtml = (item.scontiDettaglio || []).map(s => `<div class="text-success fw-bold text-nowrap" style="font-size: 9px;"><i class="fas fa-tag"></i> -${formatEuro(s.valore)}</div>`).join('');
 
         return `
         <tr style="border-bottom: 1px solid #f0f0f0;">
             <td class="ps-3 py-2" style="width: 45%;">
-                <!-- Descrizione Articolo -->
                 <div class="fw-bold text-dark" style="font-size:13px; line-height: 1.1;">${testoPrincipaleBold}</div>
-                
-                <!-- Codice/Titolo tecnico -->
-                ${sottotitoloItalic ? `<div class="text-muted mb-1" style="font-size: 9px; font-style: italic; line-height: 1;">${sottotitoloItalic}</div>` : ''}
-                
-                <!-- Beneficiario -->
-                <div style="font-size:10px; margin-top: 2px;">Per: <span class="text-danger fw-bold">${item.nomeMembro}</span></div>
+                ${sottotitoloItalic ? `<div class="text-muted mb-1" style="font-size: 9px; font-style: italic;">${sottotitoloItalic}</div>` : ''}
+                <div style="font-size:10px;">Per: <span class="text-danger fw-bold">${item.nomeMembro}</span></div>
             </td>
-            <td class="text-center text-muted d-none d-md-table-cell" style="font-size:11px; width: 15%;">
-                ${formatEuro(item.prezzoBase)}
-            </td>
-            <td class="text-center py-2" style="width: 20%;">
-                ${sctHtml || '<span class="text-muted" style="font-size: 10px;">-</span>'}
-            </td>
-            <td class="text-end py-2 pe-3" style="width: 15%;">
-                <div class="fw-bold text-dark" style="font-size:0.95rem;">${formatEuro(item.finalPrice)}</div>
-            </td>
-            <td class="text-center" style="width: 5%;">
-                <button class="btn btn-sm btn-link text-danger p-0" onclick="window.removeAndRefresh('${item.idUnivoco}')">
-                    <i class="fas fa-times-circle"></i>
-                </button>
+            <td class="text-center text-muted d-none d-md-table-cell">${formatEuro(item.prezzoBase)}</td>
+            <td class="text-center py-2">${sctHtml || '-'}</td>
+            <td class="text-end py-2 pe-3"><div class="fw-bold text-dark">${formatEuro(item.finalPrice)}</div></td>
+            <td class="text-center">
+                <button class="btn btn-sm btn-link text-danger p-0" onclick="window.removeAndRefresh('${item.idUnivoco}')"><i class="fas fa-times-circle"></i></button>
             </td>
         </tr>`;
     }).join('');
 
-    // 5. Iniezione HTML Finale (con Table Header fisso)
+    // 2. INIEZIONE HTML (Questo distrugge i vecchi bottoni PayPal)
     container.innerHTML = `
     <div class="card shadow-sm mb-3" style="border-radius: 12px; overflow: hidden; border: 1px solid #ddd;">
       <div class="p-2 bg-dark text-white d-flex justify-content-between align-items-center">
@@ -208,21 +190,46 @@ window.renderCartUI = function () {
       </div>
       <div class="table-responsive bg-white">
         <table class="table table-hover align-middle mb-0" style="table-layout: fixed; width: 100%;">
-          <thead class="bg-light">
-            <tr style="font-size: 9px; text-transform: uppercase; color: #999; border-bottom: 1px solid #eee;">
-               <th class="ps-3 py-1" style="width: 45%;">Beneficiario</th>
-               <th class="text-center py-1 d-none d-md-table-cell" style="width: 15%;">Listino</th>
-               <th class="text-center py-1" style="width: 20%;">Sconti</th>
-               <th class="text-end pe-3 py-1" style="width: 15%;">Totale</th>
+          <thead>
+            <tr style="font-size: 9px; text-transform: uppercase; color: #999;">
+               <th class="ps-3 py-1">Beneficiario</th>
+               <th class="text-center py-1 d-none d-md-table-cell">Listino</th>
+               <th class="text-center py-1">Sconti</th>
+               <th class="text-end pe-3 py-1">Totale</th>
                <th style="width: 40px;"></th>
             </tr>
           </thead>
           <tbody>${htmlRows}</tbody>
         </table>
       </div>
-      <!-- Footer (Coupon e Checkout) -->
       ${renderCartFooter(total, adulti)} 
     </div>`;
+
+    container.classList.remove('d-none');
+    container.style.display = 'block';
+    if (divider) divider.classList.remove('d-none');
+    if (countEl) countEl.innerText = itemsIscrizioni.length;
+
+    // 3. RE-INIZIALIZZAZIONE PAYPAL
+    // Chiamiamo il servizio solo se abbiamo articoli e non lo abbiamo appena fatto
+    if (!shopPaypalRendered && itemsIscrizioni.length > 0) {
+        shopPaypalRendered = true; // Lo blocchiamo subito
+        const idFam = window.globalData.idFamiglia || window.globalData.famiglia?.ID_Famiglia;
+
+        // Timeout minimo per essere sicuri che il div sia nel DOM
+        setTimeout(() => {
+            initPaypalCheckout(
+                'paypal-button-container-shop',
+                itemsIscrizioni,
+                idFam,
+                auth.currentUser.email,
+                (details) => {
+                    alert("Iscrizioni completate con successo! 🎉");
+                    window.location.href = "index.html";
+                }
+            );
+        }, 100);
+    }
 };
 
 // Funzione di supporto per pulire il codice del footer
@@ -256,9 +263,16 @@ function renderCartFooter(total, adulti) {
             <small class="text-muted text-uppercase fw-bold d-block" style="font-size:9px; line-height: 1;">Totale iscrizioni:</small>
             <div class="h4 fw-bold text-danger mb-0">${formatEuro(total)}</div>
         </div>
-        <button class="btn btn-success fw-bold px-4 py-2 rounded-pill shadow-sm" style="font-size: 11px;" onclick="window.checkout()">
-          CONFERMA E PROCEDI <i class="fas fa-arrow-right ms-1"></i>
-        </button>
+        
+        <div class="d-flex flex-column" style="width: 220px;">
+            <!-- PULSANTE BONIFICO -->
+            <button class="btn btn-bonifico mb-2" onclick="window.handleBonifico()">
+                <i class="fas fa-university"></i> PAGA CON BONIFICO
+            </button>
+            
+            <!-- CONTENITORE PAYPAL -->
+            <div id="paypal-button-container-shop"></div>
+        </div>
       </div>`;
 }
 
@@ -997,4 +1011,19 @@ window.checkout = async function () {
     } finally {
         if (loader) loader.style.setProperty('display', 'none', 'important');
     }
+};
+
+window.handleBonifico = async () => {
+    const itemsIscrizioni = (window.cart || []).filter(item => item.tipo === "ISCRIZIONE");
+    const idFam = window.globalData.idFamiglia || window.globalData.famiglia?.ID_Famiglia;
+
+    await processBankTransferCheckout(
+        itemsIscrizioni,
+        idFam,
+        auth.currentUser.email,
+        () => {
+            alert("Ordine registrato! Effettua il bonifico e invia la ricevuta alla segreteria. 🎉");
+            window.location.href = "index.html";
+        }
+    );
 };

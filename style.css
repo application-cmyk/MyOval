@@ -2,15 +2,15 @@
    1. VARIABILI E RESET RADICE
    ============================================================ */
 :root {
-  --brand: #a00000;
-  /* Rosso Rugby Milano */
+  --brand: #BF2322;
+  /* Nuovo Rosso Rugby Milano */
   --brand-dark: #1a2b3c;
   /* Blu Notte */
   --bg-light: #f4f7f6;
   /* Grigio Sfondo */
   --border-grey: #dee2e6;
   --text-muted: #7f8c8d;
-  --rm-red: #a00000;
+  --rm-red: #BF2322;
   --rm-dark: #212529;
   --rm-success: #2d8a4e;
 }
@@ -43,7 +43,7 @@ body {
   height: 65px !important;
   /* Abbassiamo la navbar a 1000 (standard Bootstrap) */
   z-index: 1030 !important;
-  background-color: #a00000 !important;
+  background-color: #BF2322 !important;
 }
 
 /* Il backdrop (lo sfondo scuro del modale) deve stare sopra la navbar */
@@ -217,7 +217,8 @@ body {
 
 .val-field:focus {
   border-color: var(--brand);
-  box-shadow: 0 0 0 0.25rem rgba(160, 0, 0, 0.1);
+  box-shadow: 0 0 0 0.25rem rgba(191, 35, 34, 0.1);
+  /* Colore aggiornato in RGBA */
 }
 
 .val-field.is-invalid {
@@ -568,8 +569,8 @@ body {
 /* Pulsante ACQUISTA Rosso Solido */
 
 .btn-acquista {
-  background-color: #a00000 !important;
-  /* Rosso RM */
+  background-color: #BF2322 !important;
+  /* Nuovo Rosso RM */
   color: white !important;
   border: none !important;
   border-radius: 8px !important;
@@ -582,8 +583,8 @@ body {
 }
 
 .btn-acquista:hover {
-  background-color: #800000 !important;
-  /* Rosso più scuro al passaggio */
+  background-color: #991C1B !important;
+  /* Versione leggermente più scura del nuovo rosso per hover */
   transform: translateY(-1px);
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
@@ -690,8 +691,8 @@ body {
 }
 
 .cart-item-row .beneficiary-for b {
-  color: #a00000;
-  /* Rosso Rugby Milano */
+  color: #BF2322;
+  /* Nuovo Rosso Rugby Milano */
   text-transform: uppercase;
 }
 
@@ -731,7 +732,8 @@ body {
 .total-amount {
   font-size: 1.8rem;
   font-weight: 800;
-  color: #a00000;
+  color: #BF2322;
+  /* Nuovo Rosso RM */
   line-height: 1;
 }
 
@@ -745,4 +747,53 @@ body {
   text-transform: uppercase;
   border: none !important;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Pulsante Bonifico */
+.btn-bonifico {
+  background-color: #1a2b3c !important;
+  /* Blu scuro professionale */
+  color: white !important;
+  border-radius: 50px !important;
+  padding: 8px 20px !important;
+  font-weight: 700 !important;
+  font-size: 0.75rem !important;
+  text-transform: uppercase;
+  border: none !important;
+  transition: all 0.2s;
+  width: 100%;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-bonifico:hover {
+  background-color: #0d161f !important;
+  transform: translateY(-1px);
+}
+
+.btn-bonifico i {
+  margin-right: 8px;
+}
+
+/* Quando il body ha la classe 'is-production' nascondiamo gli elementi */
+body.is-production .tab-container,
+body.is-production #login-form,
+body.is-production #register-form,
+body.is-production .auth-link-sm,
+body.is-production #btn-main-iscrizioni {
+  display: none !important;
+}
+
+/* Opzionale: rendi il pulsante Google più centrale e "unico" in produzione */
+body.is-production .staff-section {
+  background: transparent;
+  padding: 0;
+}
+
+body.is-production .staff-section p {
+  color: #495057 !important;
+  /* Grigio scuro invece di rosso */
+  font-size: 0.8rem;
 }

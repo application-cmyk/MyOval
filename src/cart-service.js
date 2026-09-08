@@ -1,6 +1,9 @@
 import { db } from "./firebase-config.js";
 import { doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 
+/**
+ * Ascolta i cambiamenti del carrello in tempo reale
+ */
 export function listenToCart(idFamiglia, callback) {
     if (!idFamiglia) return;
     const cartRef = doc(db, "carts", idFamiglia.toString());
@@ -13,7 +16,11 @@ export function listenToCart(idFamiglia, callback) {
     });
 }
 
+/**
+ * Aggiunge un articolo al carrello Firestore
+ */
 export async function addToFirestoreCart(idFamiglia, item) {
+    if (!idFamiglia) return;
     const cartRef = doc(db, "carts", idFamiglia.toString());
     const cartSnap = await getDoc(cartRef);
 
@@ -22,8 +29,11 @@ export async function addToFirestoreCart(idFamiglia, item) {
         items = cartSnap.data().items || [];
     }
 
-    // Aggiungiamo ID univoco per la riga
-    item.idUnivoco = Date.now().toString() + "_" + item.skuId;
+    // Creiamo un ID univoco per la riga se non esiste
+    if (!item.idUnivoco) {
+        item.idUnivoco = Date.now().toString() + "_" + item.skuId;
+    }
+
     items.push(item);
 
     await setDoc(cartRef, {
@@ -33,7 +43,11 @@ export async function addToFirestoreCart(idFamiglia, item) {
     }, { merge: true });
 }
 
+/**
+ * Rimuove un singolo articolo. Se è l'ultimo, elimina il documento.
+ */
 export async function removeFromFirestoreCart(idFamiglia, idUnivoco) {
+    if (!idFamiglia) return;
     const cartRef = doc(db, "carts", idFamiglia.toString());
     const cartSnap = await getDoc(cartRef);
 
@@ -46,5 +60,20 @@ export async function removeFromFirestoreCart(idFamiglia, idUnivoco) {
         } else {
             await updateDoc(cartRef, { items: newItems });
         }
+    }
+}
+
+/**
+ * SVUOTA COMPLETAMENTE IL CARRELLO (Necessaria per il checkout)
+ * Questa è la funzione che mancava e causava l'errore
+ */
+export async function clearFirestoreCart(idFamiglia) {
+    if (!idFamiglia) return;
+    console.log("🧹 Svuotamento carrello Firestore per famiglia:", idFamiglia);
+    const cartRef = doc(db, "carts", idFamiglia.toString());
+    try {
+        await deleteDoc(cartRef);
+    } catch (e) {
+        console.error("Errore durante clearFirestoreCart:", e);
     }
 }

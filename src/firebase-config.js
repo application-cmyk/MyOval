@@ -26,8 +26,11 @@ const testConfig = {
 };
 
 // Logica per determinare l'ambiente
-const isProd = window.location.hostname.includes("rugby-milano-app-16681");
+export const isProd = window.location.hostname.includes("rugby-milano-app-16681");
 const config = isProd ? prodConfig : testConfig;
+
+// Creiamo una stringa standard da passare alle app esterne
+export const APP_ENV = isProd ? "production" : "staging";
 
 // Abilita il debug in locale
 if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {

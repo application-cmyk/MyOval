@@ -1,7 +1,7 @@
 /**
  * Inizializzazione Portale con Error Handling avanzato
  */
-import { db } from "./firebase-config.js";
+import { db, APP_ENV } from "./firebase-config.js";
 import { doc, getDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { buildFamilyUI, selectMember } from "./anagrafica.js";
 import { callGAS, mapArraysToObjects, formattaDataRugby } from "./utils.js";
@@ -12,24 +12,45 @@ import { callGAS, mapArraysToObjects, formattaDataRugby } from "./utils.js";
 export async function initPortal(user) {
     const loading = document.getElementById('loading-overlay');
     const errorContainer = document.getElementById('global-error-container');
-    const email = user.email.toLowerCase().trim();
 
+    // --- 1. LOGICA IMPERSONATE (SuperUser Mode) ---
+    const realEmail = user.email.toLowerCase().trim();
+    let emailToLoad = realEmail;
+    const impersonateEmail = sessionStorage.getItem('impersonate_email');
+
+    if (impersonateEmail) {
+        const staffSnap = await getDoc(doc(db, "staff_roles", realEmail));
+        if (staffSnap.exists()) {
+            emailToLoad = impersonateEmail.toLowerCase().trim();
+            console.warn(`🛠️ MODALITÀ ASSISTENZA: Operando come ${emailToLoad}`);
+            if (typeof renderAdminWarningBar === "function") renderAdminWarningBar(emailToLoad);
+        } else {
+            console.error("🚫 Tentativo di impersonificazione non autorizzato.");
+            sessionStorage.removeItem('impersonate_email');
+        }
+    }
+
+    const email = emailToLoad;
     if (errorContainer) errorContainer.classList.add('d-none');
 
     try {
-        // --- 1. VERIFICA CACHE (Sessione già attiva) ---
+        // --- 2. VERIFICA CACHE ---
         const rawCache = sessionStorage.getItem('myoval_shared_data');
         if (rawCache) {
             const parsed = JSON.parse(rawCache);
             if (parsed.userEmail === email && parsed.idFamiglia && parsed.idFamiglia !== "N/D") {
                 window.globalData = parsed;
                 console.log("%c 🚀 CACHE DATA RECOVERY: Sessione valida. ", "color: #28a745; font-weight: bold;");
+
+                // --- RE-INITIALIZE REALTIME CART ON CACHE RECOVERY ---
+                startGlobalCartListener(window.globalData.idFamiglia);
+
                 renderFinalUI(loading);
                 return;
             }
         }
 
-        // --- 2. CARICAMENTO DATI DAI SERVER ---
+        // --- 3. CARICAMENTO DATI ---
         if (loading) {
             loading.style.setProperty('display', 'flex', 'important');
             const h5 = loading.querySelector('h5');
@@ -40,14 +61,12 @@ export async function initPortal(user) {
         const isNumeric = /^\d+$/.test(username);
         const isInternal = email.endsWith("@rugbymilano.it");
 
-        // A. Determinazione Gruppo Operatore (Staff vs Socio)
         let userGroup = "ASSOCIATO";
         const roleSnap = await getDoc(doc(db, "staff_roles", email));
         if (roleSnap.exists()) {
             userGroup = (roleSnap.data().Gruppo || roleSnap.data().Ruolo || "STAFF").toUpperCase();
         }
 
-        // B. Determinazione Strada Accesso
         let gasAction = "";
         let gasParams = {};
         let idFamigliaDaFirestore = null;
@@ -58,81 +77,56 @@ export async function initPortal(user) {
         } else {
             const accountSnap = await getDoc(doc(db, "accounts", email));
             if (!accountSnap.exists()) {
-                // Avvio Wizard per nuovi utenti
+                if (impersonateEmail) throw new Error("Account socio non configurato.");
                 return avviaOnboardingSequence(email, loading);
             }
 
             const accountData = accountSnap.data();
             idFamigliaDaFirestore = accountData.ID_Famiglia || accountData.id_famiglia;
 
-            // --- AGGIUNTA: Se non è staff, prendiamo il gruppo dall'account ---
             if (userGroup === "ASSOCIATO") {
                 userGroup = (accountData.Gruppo || accountData.Ruolo || "ASSOCIATO").toUpperCase().trim();
             }
-            console.log("👤 GRUPPO DEFINITIVO:", userGroup);
-            idFamigliaDaFirestore = accountData.ID_Famiglia || accountData.id_famiglia;
             gasAction = "GetDatiFamigliaAnagTesseratiIDFam";
             gasParams = { idFamiglia: idFamigliaDaFirestore ? idFamigliaDaFirestore.toString() : "" };
         }
 
-        // C. Chiamata Parallela Bridge GAS e Firestore
-        console.log(`📡 Chiamata Bridge: ${gasAction}...`);
+        // --- 4. CHIAMATA PARALLELA (RIMOZIONE getUserCart) ---
+        console.log(`📡 Caricamento dati per Gruppo: ${userGroup}`);
 
-        // --- MODIFICA QUI ---
-        // Rimuoviamo getShopPortalDataWithCart e usiamo Firestore + getUserCart
-        const [rawRes, uiConfig, servizi, cartData, shopArticoliSnap] = await Promise.all([
+        const [rawRes, uiConfig, servizi, shopArticoliSnap] = await Promise.all([
             callGAS(gasAction, gasParams),
             getUIConfigByGroup(userGroup),
             getServiziOnlineByGroup(userGroup),
-            // Recuperiamo solo il carrello da GAS
-            callGAS("getUserCart", { idFamiglia: idFamigliaDaFirestore || "0" }),
-            // Recuperiamo gli articoli da Firestore (se servono per la dashboard)
+            // callGAS("getUserCart", ...) <--- RIMOZIONE EFFETTUATA QUI
             getDocs(collection(db, "shop_items"))
         ]);
 
         if (!rawRes || !rawRes.famiglia) throw new Error("Dati non ricevuti dal server Google.");
 
-        // Prepariamo l'array degli articoli da Firestore
         const articoliShop = shopArticoliSnap.docs.map(d => ({ ID_Articolo: d.id, ...d.data() }));
-
-        // D. Mapping Dati
         const famigliaOggetti = mapArraysToObjects(rawRes.famiglia);
 
         const creaMappa = (arr) => {
             const m = {};
-            arr.forEach(o => {
+            (arr || []).forEach(o => {
                 const id = (o.IDContatto || o.ID_Contatto || "").toString().toLowerCase().trim();
                 if (id) m[id] = o;
             });
             return m;
         };
 
-        // --- 3. LOGICA DI SICUREZZA ID FAMIGLIA (FIX CRITICO) ---
-        // Evitiamo che il FIR (username) venga salvato come ID Famiglia
-        let idFamigliaFinale = "N/D";
-
-        // Priorità 1: Valore certo da Firestore (per esterni)
-        if (idFamigliaDaFirestore) {
-            idFamigliaFinale = idFamigliaDaFirestore;
-        } else {
-            // Priorità 2: Valore dalla colonna ID_Famiglia del primo membro trovato
-            const idDalSocio = (famigliaOggetti.length > 0) ? famigliaOggetti[0].ID_Famiglia : null;
-            // Priorità 3: Valore dal campo debug inviato da GAS
-            const idDalDebug = rawRes.debug?.codFam;
-
-            // Validazione: L'ID non deve corrispondere al FIR (username)
-            if (idDalSocio && idDalSocio.toString() !== username) {
-                idFamigliaFinale = idDalSocio;
-            } else if (idDalDebug && idDalDebug.toString() !== username) {
-                idFamigliaFinale = idDalDebug;
-            }
-        }
-
+        // --- 5. LOGICA DI SICUREZZA ID FAMIGLIA ---
+        let idFamigliaFinale = idFamigliaDaFirestore || (famigliaOggetti.length > 0 ? famigliaOggetti[0].ID_Famiglia : "N/D");
         console.log(`🏠 ID FAMIGLIA VALIDATO: ${idFamigliaFinale}`);
 
-        // --- 4. SALVATAGGIO IN MEMORIA GLOBALE ---
+        // --- 6. AVVIO LISTENER CARRELLO FIRESTORE ---
+        startGlobalCartListener(idFamigliaFinale);
+
+        // --- 7. SALVATAGGIO IN MEMORIA GLOBALE ---
         window.globalData = {
             userEmail: email,
+            environment: APP_ENV,
             userGroup: userGroup,
             idFamiglia: idFamigliaFinale.toString(),
             famiglia: { data: famigliaOggetti },
@@ -142,16 +136,13 @@ export async function initPortal(user) {
             codici: mapArraysToObjects(rawRes.codici),
             config: uiConfig,
             funzioni: servizi,
-            // DATI SHOP DA FIRESTORE + CARRELLO GAS
             articoli: articoliShop,
-            persistedCart: cartData || [],
+            cart: [], // Verrà popolato in tempo reale dal listener
             currentProfile: "ASSOCIATO",
             selectedMemberIndex: 0
         };
 
-        // Salvataggio nella valigia di sessione per App Satellite (Shop, Certificati...)
         sessionStorage.setItem('myoval_shared_data', JSON.stringify(window.globalData));
-
         renderFinalUI(loading);
 
     } catch (error) {
@@ -159,6 +150,46 @@ export async function initPortal(user) {
         if (typeof mostraErroreBloccante === "function") mostraErroreBloccante(error.message);
     }
 }
+
+/**
+ * Funzione di supporto per gestire il carrello real-time in tutta la dashboard
+ */
+function startGlobalCartListener(idFamiglia) {
+    if (!idFamiglia || idFamiglia === "N/D") return;
+
+    import("./cart-service.js").then(m => {
+        m.listenToCart(idFamiglia, (items) => {
+            console.log(`🛒 Dashboard: Carrello sincronizzato (${items.length} articoli)`);
+
+            // Aggiorna variabile in memoria
+            if (window.globalData) window.globalData.cart = items;
+
+            // Aggiorna badge carrello nella Navbar se presente
+            const badge = document.getElementById('cart-count');
+            if (badge) badge.innerText = items.length;
+        });
+    });
+}
+
+function renderAdminWarningBar(target) {
+    if (document.getElementById('admin-bar')) return;
+    const div = document.createElement('div');
+    div.id = 'admin-bar';
+    div.style = "background:#ffc107; color:black; font-weight:bold; padding:8px; text-align:center; position:fixed; top:0; width:100%; z-index:10001; border-bottom:2px solid #000; font-size:12px;";
+    div.innerHTML = `MODALITÀ ASSISTENZA: STAI OPERANDO COME ${target.toUpperCase()} 
+                     <button onclick="sessionStorage.removeItem('impersonate_email'); sessionStorage.removeItem('myoval_shared_data'); window.location.href='admin_control.html'" 
+                     class="btn btn-dark btn-sm ms-3" style="font-size:10px;">ESCI</button>`;
+    document.body.prepend(div);
+    document.body.style.paddingTop = "40px";
+}
+
+// Funzione globale per uscire dalla modalità impersonificazione
+window.exitImpersonateMode = function () {
+    sessionStorage.removeItem('impersonate_email');
+    sessionStorage.removeItem('myoval_shared_data');
+    // Torna alla pagina di ricerca admin
+    window.location.href = 'admin_control.html';
+};
 
 async function renderFinalUI(loading) {
     if (loading) loading.style.setProperty('display', 'none', 'important');
