@@ -3,7 +3,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { callGAS, safeSet, formattaDataRugby } from "./utils.js";
 
 // Definiamo sharedData a livello di modulo (visibile a tutte le funzioni nel file)
-let sharedData = null; 
+let sharedData = null;
 let idSelezionato = null;
 
 /**
@@ -13,7 +13,7 @@ onAuthStateChanged(auth, (user) => {
     if (user) {
         // Recupero il pacchetto dati dal sessionStorage
         const raw = sessionStorage.getItem('myoval_shared_data');
-        
+
         if (!raw) {
             console.error("❌ Dati sessione non trovati");
             window.location.href = "index.html";
@@ -34,7 +34,7 @@ onAuthStateChanged(auth, (user) => {
             // 3. AVVIO LOGICA UI
             if (sharedData.famiglia && sharedData.famiglia.data) {
                 renderAtletiSelector();
-                
+
                 // Seleziona l'atleta che era attivo nella dashboard
                 const initialId = sharedData.famiglia.data[sharedData.selectedMemberIndex]?.IDContatto;
                 if (initialId) {
@@ -60,7 +60,7 @@ function renderAtletiSelector() {
     if (!container || !sharedData) return;
 
     // Filtriamo per mostrare solo chi ha "atleta" nel ruolo
-    const atleti = sharedData.famiglia.data.filter(m => 
+    const atleti = sharedData.famiglia.data.filter(m =>
         (m.Ruolo || "").toLowerCase().includes("atleta")
     );
 
@@ -95,7 +95,7 @@ window.selezionaAtleta = (id) => {
     if (a) {
         safeSet('nome-atleta-selezionato', `Per: ${a.Nome} ${a.Cognome}`);
     }
-    
+
     // Pulisce eventuali messaggi precedenti
     const statusMsg = document.getElementById('status-message');
     if (statusMsg) statusMsg.innerHTML = '';
@@ -104,7 +104,7 @@ window.selezionaAtleta = (id) => {
 /**
  * 4. LOGICA UPLOAD (Bridge GAS)
  */
-window.avviaUpload = function() {
+window.avviaUpload = function () {
     const fileEl = document.getElementById('fileInput');
     const scadenzaEl = document.getElementById('scadenzaInput');
     const btn = document.getElementById('btnUpload');
@@ -139,7 +139,7 @@ window.avviaUpload = function() {
         try {
             // Chiamata al ponte GAS (che deve gestire 'handleUploadCertificato')
             const res = await callGAS("handleUploadCertificato", fileObject);
-            
+
             document.getElementById('status-message').innerHTML = `
                 <div class="alert alert-success shadow-sm border-0 p-3">
                     <i class="fas fa-check-circle me-2"></i> ${res.message}

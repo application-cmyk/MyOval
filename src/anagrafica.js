@@ -162,6 +162,14 @@ export async function selectMember(index) {
     const priv = window.globalData.privacyData[idC] || {};
     const fullData = { ...m, ...tech, ...kit, ...priv };
 
+    // --- AGGIUNGI QUESTI LOG DIAGNOSTICI ---
+    console.group(`🔍 Verifica Merge per ID: "${idC}"`);
+    console.log("👕 Taglie trovate (kit):", kit);
+    console.log("🔒 Privacy trovata (priv):", priv);
+    console.log("🧩 fullData contiene Taglia_Tshirt?:", fullData.Taglia_Tshirt);
+    console.log("🧩 fullData contiene Privacy_ASR_1?:", fullData.Privacy_ASR_1);
+    console.groupEnd();
+
     // 3. UI: Gestione Bolle
     document.querySelectorAll('.family-item').forEach(el => el.classList.remove('active'));
     const bubble = document.getElementById(`f-${index}`);
@@ -272,6 +280,7 @@ export function renderAnagraficaForm(memberData, config, isAtleta, targetContain
 
         // --- APPLICAZIONE LARGHEZZA (col-md-X) ---
         const colSize = currentConf.larghezza || 4;
+        console.log("CONFIG ORIGINALE:", config.find(c => c.id === 'IDContatto'));
 
         html += `
             <div class="col-md-${colSize} col-12 mb-1">
@@ -336,29 +345,47 @@ function agganciaListenerValidazione(container, targetId) {
  * Generatore di input HTML con log diagnostici avanzati per la risoluzione dinamica
  */
 function generaInputHtml(conf, valore, errorClass = "", memberData = {}, optionsOverride = null) {
+    const fieldId = conf.id || conf.name || "campo-senza-id";
+    const fieldLabel = conf.label || conf.titolo || fieldId;
+
     const tipo = (conf.tipoInput || "testo").toLowerCase().trim();
+
+    // Helper di conversione booleana
+    const parseBoolean = (val) => {
+        if (typeof forceBool === "function") return forceBool(val);
+        if (typeof val === "boolean") return val;
+        if (typeof val === "string") {
+            const s = val.trim().toLowerCase();
+            return s === "true" || s === "si" || s === "sì" || s === "1" || s === "yes";
+        }
+        if (typeof val === "number") return val === 1;
+        return false;
+    };
+
+    // Cerchiamo tutte le possibili varianti di readonly
+    const rawRo = conf.readonly ?? conf.readOnly ?? conf.ReadOnly ?? conf["Read Only"] ?? conf.readonly_ ?? conf.solaLettura ?? conf.disabilitato;
+    const isReadOnly = parseBoolean(rawRo);
+
+    const rawRq = conf.required ?? conf.Required ?? conf["Required"];
+    const isRequired = parseBoolean(rawRq);
+
+    // Costanti grafiche e attributi
+    const roStyle = "background-color: #f8f9fa; cursor: not-allowed;";
     const commonClass = `form-control form-control-sm val-field shadow-none ${errorClass}`;
     const selectClass = `form-select form-select-sm val-field shadow-none ${errorClass}`;
-    const ro = conf.readonly ? "readonly disabled style='background-color: #f8f9fa; cursor: not-allowed;'" : "";
-    const rq = conf.required ? "required" : "";
+    const ro = isReadOnly ? `readonly disabled style='${roStyle}'` : "";
+    const rq = isRequired ? "required" : "";
     const v = (valore === null || valore === undefined) ? "" : valore;
 
     // 1. Inizializziamo le opzioni dal campo config
     let options = Array.isArray(conf.opzioni) ? conf.opzioni : [];
 
-    // --- LOGICA DINAMICA ARTICOLO (Puntatore Articolo:...) ---
+    // --- LOGICA DINAMICA ARTICOLO ---
     if (typeof conf.opzioni === "string" && conf.opzioni.toUpperCase().startsWith("ARTICOLO:")) {
-
-        // CASO A: Siamo nello SHOP (abbiamo un override esplicito)
         if (optionsOverride && optionsOverride[conf.id]) {
             options = optionsOverride[conf.id];
-            console.log(`✅ [${conf.id}] Opzioni caricate da override Shop.`);
-        }
-        // CASO B: Siamo nella DASHBOARD (applichiamo la tua logica di ricerca)
-        else {
-            const targetCol = conf.opzioni.split(":")[1]; // es: "Lista_Squadre"
-
-            // --- TUA LOGICA DI RICERCA INTEGRATA ---
+        } else {
+            const targetCol = conf.opzioni.split(":")[1];
             const areaAtl = (getValue(memberData, "Area")).toUpperCase().trim();
             const catAtl = (getValue(memberData, "Categoria_Fed") || getValue(memberData, "Categoria")).toUpperCase().trim();
             const tipoAtl = (getValue(memberData, "Tipo")).toUpperCase().trim();
@@ -372,10 +399,8 @@ function generaInputHtml(conf, valore, errorClass = "", memberData = {}, options
 
             if (article && article[targetCol]) {
                 options = article[targetCol].split(',').map(s => s.trim()).filter(Boolean);
-                console.log(`🎯 [${conf.id}] Match riuscito: caricate squadre dall'articolo ${article.Nome_Articolo}`);
             } else {
-                console.warn(`⚠️ Nessun articolo trovato per il match: Area:${areaAtl}, Cat:${catAtl}, Tipo:${tipoAtl}`);
-                options = []; // Se non c'è match, la lista deve essere vuota, non "tutte le squadre"
+                options = [];
             }
         }
     }
@@ -384,7 +409,8 @@ function generaInputHtml(conf, valore, errorClass = "", memberData = {}, options
     switch (tipo) {
         case "multi-lista":
             const currentSelected = v.toString().toLowerCase().split(',').map(s => s.trim());
-            let multiHtml = `<div class="multi-list-container ${errorClass}" data-id="${conf.id}" style="border: 1px solid #ced4da; padding: 10px; border-radius: 8px; background: #fff; max-height: 150px; overflow-y: auto;">`;
+            const bgContainer = isReadOnly ? '#f8f9fa' : '#fff';
+            let multiHtml = `<div class="multi-list-container ${errorClass}" data-id="${conf.id}" style="border: 1px solid #ced4da; padding: 10px; border-radius: 8px; background: ${bgContainer}; max-height: 150px; overflow-y: auto;">`;
 
             if (options.length === 0) {
                 multiHtml += `<div class="small text-muted italic p-1">Nessuna opzione disponibile per la categoria.</div>`;
@@ -396,8 +422,8 @@ function generaInputHtml(conf, valore, errorClass = "", memberData = {}, options
 
                 multiHtml += `
                     <div class="d-flex align-items-center mb-1">
-                        <input type="checkbox" class="multi-check-part me-2" id="chk_${conf.id}_${idx}" value="${optStr}" ${isChecked} ${conf.readonly ? 'disabled' : ''} style="width:16px; height:16px;">
-                        <label class="small mb-0" for="chk_${conf.id}_${idx}" style="cursor:pointer; flex-grow: 1;">${optStr}</label>
+                        <input type="checkbox" class="multi-check-part me-2" id="chk_${conf.id}_${idx}" value="${optStr}" ${isChecked} ${isReadOnly ? 'disabled' : ''} style="width:16px; height:16px; ${isReadOnly ? 'cursor:not-allowed;' : ''}">
+                        <label class="small mb-0" for="chk_${conf.id}_${idx}" style="${isReadOnly ? 'cursor:not-allowed;' : 'cursor:pointer;'} flex-grow: 1;">${optStr}</label>
                     </div>`;
             });
             return multiHtml + `</div><input type="hidden" class="val-field" data-id="${conf.id}" id="val_${conf.id}" value="${v}" ${rq}>`;
@@ -410,11 +436,40 @@ function generaInputHtml(conf, valore, errorClass = "", memberData = {}, options
                 const isSel = (options.length === 1 || (valAnag !== "" && valAnag.includes(optStr.toLowerCase()))) ? "selected" : "";
                 opts += `<option value="${optStr}" ${isSel}>${optStr}</option>`;
             });
-            return `<select class="${selectClass}" data-id="${conf.id}" ${conf.readonly ? 'disabled' : ''} ${rq}>${opts}</select>`;
+            return `<select class="${selectClass}" data-id="${conf.id}" ${isReadOnly ? `disabled style='${roStyle}'` : ''} ${rq}>${opts}</select>`;
 
         case "switch":
         case "checkbox":
-            return `<div class="form-check form-switch pt-1"><input class="form-check-input val-field ${errorClass}" type="checkbox" role="switch" data-id="${conf.id}" ${forceBool(v) ? 'checked' : ''} ${conf.readonly ? 'disabled' : ''} ${rq}></div>`;
+            // Helper robusto locale per il controllo booleano
+            const checkAttivo = (val) => {
+                if (val === true || val === 1) return true;
+                if (typeof val === "string") {
+                    const s = val.trim().toLowerCase();
+                    return s === "true" || s === "si" || s === "sì" || s === "1" || s === "vero";
+                }
+                if (typeof forceBool === "function") return forceBool(val);
+                return false;
+            };
+
+            const isChecked = checkAttivo(v);
+
+            // --- 🔍 LOG DIAGNOSTICO SWITCH/PRIVACY ---
+            console.group(`🔘 RENDERING SWITCH: [${conf.id}] - "${conf.label || ''}"`);
+            console.log("1. Valore grezzo ricevuto dal record:", valore);
+            console.log("2. Valore normalizzato (v):", v, `(tipo: ${typeof v})`);
+            console.log("3. Esito calcolo 'checked':", isChecked ? "🟩 ACCESO (checked)" : "⬜ SPENTO (non checked)");
+            console.groupEnd();
+
+            return `
+                <div class="form-check form-switch pt-1">
+                    <input class="form-check-input val-field ${errorClass}" 
+                           type="checkbox" 
+                           role="switch" 
+                           data-id="${conf.id}" 
+                           ${isChecked ? 'checked' : ''} 
+                           ${isReadOnly ? 'disabled style="cursor:not-allowed;"' : ''} 
+                           ${rq}>
+                </div>`;
 
         case "data":
             let ds = v.toString().includes('/') ? v.split('/').reverse().join('-') : v.split('T')[0];
@@ -422,38 +477,35 @@ function generaInputHtml(conf, valore, errorClass = "", memberData = {}, options
 
         case "immagine":
             const imgErr = errorClass ? "img-invalid" : "";
-            const thumb = getThumbnailUrl(v);
+            const thumb = typeof getThumbnailUrl === "function" ? getThumbnailUrl(v) : v;
 
             return `
                 <div class="d-flex align-items-center gap-2" id="container_${conf.id}">
                     <div class="position-relative">
-                        <!-- Rimosso lo stile inline width/height per usare quello rettangolare del CSS -->
                         <img src="${thumb}" 
-                        id="prev_${conf.id}" 
-                        class="img-doc-preview shadow-sm ${imgErr}" 
-                     onclick="window.open('${v}','_blank')"
-                     title="Clicca per visualizzare">
+                             id="prev_${conf.id}" 
+                             class="img-doc-preview shadow-sm ${imgErr}" 
+                             onclick="window.open('${v}','_blank')"
+                             title="Clicca per visualizzare" style="cursor: pointer;">
                 
-                ${!conf.readonly ? `
-                    <label for="file_${conf.id}" class="btn btn-outline-danger btn-xs p-1 position-absolute" 
-                           style="bottom: -5px; right: -5px; font-size:8px; border-radius:10px; background:white; line-height:1; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor:pointer;">
-                        CARICA
-                    </label>
-                    <input type="file" id="file_${conf.id}" class="d-none" accept="image/*,application/pdf" 
-                           onchange="handleFileUpload(this, '${conf.id}', '${conf.label}')">
-                ` : ''}
+                        ${!isReadOnly ? `
+                            <label for="file_${conf.id}" class="btn btn-outline-danger btn-xs p-1 position-absolute" 
+                                   style="bottom: -5px; right: -5px; font-size:8px; border-radius:10px; background:white; line-height:1; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor:pointer;">
+                                CARICA
+                            </label>
+                            <input type="file" id="file_${conf.id}" class="d-none" accept="image/*,application/pdf" 
+                                   onchange="handleFileUpload(this, '${conf.id}', '${conf.label}')">
+                        ` : ''}
                     </div>
             
-            <div id="spin_${conf.id}" class="spinner-border spinner-border-sm text-danger d-none ms-1"></div>
-            
-            <input type="hidden" class="val-field ${errorClass}" data-id="${conf.id}" id="val_${conf.id}" value="${v}" ${rq}>
+                    <div id="spin_${conf.id}" class="spinner-border spinner-border-sm text-danger d-none ms-1"></div>
+                    <input type="hidden" class="val-field ${errorClass}" data-id="${conf.id}" id="val_${conf.id}" value="${v}" ${rq}>
                 </div>`;
 
         default:
             return `<input type="text" class="${commonClass}" data-id="${conf.id}" value="${v}" placeholder="..." ${ro} ${rq}>`;
     }
 }
-
 // Funzione helper per pulizia HTML multi-lista
 
 /**

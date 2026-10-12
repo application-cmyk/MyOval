@@ -18,7 +18,7 @@ onAuthStateChanged(auth, (user) => {
 
         // Disegna bolle
         renderAtletiSelector();
-        
+
         // Seleziona atleta attivo
         const initialId = sharedData.famiglia.data[sharedData.selectedMemberIndex]?.IDContatto;
         if (initialId) window.selezionaAtleta(initialId);
@@ -49,7 +49,7 @@ window.selezionaAtleta = (id) => {
     document.getElementById('status-message').innerHTML = '';
 };
 
-window.generaModuloPDF = async function() {
+window.generaModuloPDF = async function () {
     const tipo = document.getElementById('tipoRichiesta').value;
     const accetto = document.getElementById('checkAccetto').checked;
     const status = document.getElementById('status-message');
@@ -62,11 +62,11 @@ window.generaModuloPDF = async function() {
     // 2. Recupero dati anagrafici dal magazzino di sessione
     const m = sharedData.famiglia.data.find(x => x.IDContatto.toString() === idSelezionato.toString());
     const idCPulito = idSelezionato.toString().toLowerCase().trim();
-    
+
     // 3. Recupero Codice FIR (Ricerca incrociata tra Tabella Codici e Atleti)
     const tuttiICodici = sharedData.codici || [];
-    const rigoFIR = tuttiICodici.find(c => 
-        (c.ID_Contatto || c.IDContatto || "").toString().toLowerCase().trim() === idCPulito && 
+    const rigoFIR = tuttiICodici.find(c =>
+        (c.ID_Contatto || c.IDContatto || "").toString().toLowerCase().trim() === idCPulito &&
         (c.Tipo_Tesseramento === "FIR" || c.Ente === "FIR")
     );
 
@@ -104,9 +104,9 @@ window.generaModuloPDF = async function() {
         }
 
         // 5. CHIAMATA AL BRIDGE GAS
-        const res = await callGAS("processaRichiestaModulo", { 
-            tipoRichiesta: tipo, 
-            atleta: atletaMock 
+        const res = await callGAS("processaRichiestaModulo", {
+            tipoRichiesta: tipo,
+            atleta: atletaMock
         });
 
         // --- DIAGNOSTICA RISPOSTA ---
@@ -114,7 +114,7 @@ window.generaModuloPDF = async function() {
 
         if (res && res.url) {
             console.log("✅ URL PDF Generato:", res.url);
-            
+
             // Messaggio di successo con tasto di download manuale (se il popup viene bloccato)
             status.innerHTML = `
                 <div class="alert alert-success border-0 shadow-sm p-4 mt-3 animate__animated animate__bounceIn">
@@ -125,7 +125,7 @@ window.generaModuloPDF = async function() {
                        <i class="fas fa-file-download me-2"></i> SCARICA / APRI PDF
                     </a>
                 </div>`;
-            
+
             // Prova ad aprire il file automaticamente
             window.open(res.url, '_blank');
 

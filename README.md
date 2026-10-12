@@ -33,6 +33,11 @@ firebase use staging (per lavorare/distribuire sull'ambiente di test)
 firebase use production (per lavorare/distribuire sull'ambiente di produzione)
 
 
+## USERNAME e PASSWORD PAYPAL SANDBOX
+Username: sb-47olmi53162347@personal.example.com
+Password: l,#)s.0S
+
+
 ## UTIILIZZO SCRIPT PER FIREBASE
 Scenario	Script da usare
 "Voglio salvarmi i dati prima di fare modifiche"	node esportazione.js all staging

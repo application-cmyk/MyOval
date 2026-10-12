@@ -2,13 +2,13 @@
 import { auth, db, googleProvider } from "./firebase-config.js";
 
 // 2. Importa le funzioni di Firebase (Raggruppate in un unico blocco)
-import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signInWithPopup, 
-  signOut,
-  sendEmailVerification,
-  sendPasswordResetEmail // <--- Assicurati sia qui
+import {
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    signInWithPopup,
+    signOut,
+    sendEmailVerification,
+    sendPasswordResetEmail // <--- Assicurati sia qui
 } from "firebase/auth";
 
 import { doc, setDoc, updateDoc } from "firebase/firestore";
@@ -27,7 +27,7 @@ export const loginEmailPass = async (email, password) => {
 export const registraNuovoUtente = async (email, password, cf) => {
     // 1. Creazione account
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user; 
+    const user = userCredential.user;
 
     // 2. Invio mail
     await sendEmailVerification(user);
@@ -45,7 +45,7 @@ export const registraNuovoUtente = async (email, password, cf) => {
     await signOut(auth);
 
     // RESTITUIAMO SOLO IL DATI, NIENTE ALERT QUI
-    return { success: true }; 
+    return { success: true };
 };
 
 /**
@@ -53,7 +53,7 @@ export const registraNuovoUtente = async (email, password, cf) => {
  */
 export const aggiornaStatoUtente = async (user) => {
     if (!user) return;
-    
+
     const userRef = doc(db, "users", user.uid);
     try {
         await updateDoc(userRef, {
@@ -70,6 +70,14 @@ export const aggiornaStatoUtente = async (user) => {
  * LOGIN CON GOOGLE
  */
 export const loginConGoogle = async () => {
+    // 1. Puliamo la blacklist quando l'utente tenta un nuovo accesso
+    localStorage.removeItem('mg_email_bloccata');
+
+    // 2. Imposta la richiesta di scegliere l'account senza forzare la richiesta di permessi
+    googleProvider.setCustomParameters({
+        prompt: 'select_account'
+    });
+
     return await signInWithPopup(auth, googleProvider);
 };
 
@@ -87,7 +95,7 @@ export const recuperaEmailDaCF = async (cf) => {
     try {
         const q = query(collection(db, "accounts"), where("Codice_Fiscale", "==", cf.toUpperCase().trim()));
         const querySnapshot = await getDocs(q);
-        
+
         if (querySnapshot.empty) {
             throw new Error("Nessun account trovato per questo Codice Fiscale.");
         }
@@ -105,8 +113,8 @@ export const recuperaEmailDaCF = async (cf) => {
 
 export function mapArraysToObjects(payload) {
     if (!payload || !payload.headers || !payload.data) return [];
-    
-    const cleanHeaders = payload.headers.map(h => 
+
+    const cleanHeaders = payload.headers.map(h =>
         h.toString().trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '')
     );
 
@@ -114,7 +122,7 @@ export function mapArraysToObjects(payload) {
         let obj = {};
         cleanHeaders.forEach((h, i) => {
             let val = row[i];
-            
+
             // --- NORMALIZZAZIONE BOLEANI (VERO/FALSO e TRUE/FALSE) ---
             if (val !== null && val !== undefined) {
                 const s = val.toString().toUpperCase().trim();
@@ -124,7 +132,7 @@ export function mapArraysToObjects(payload) {
                     val = false;
                 }
             }
-            
+
             obj[h] = val;
         });
         return obj;

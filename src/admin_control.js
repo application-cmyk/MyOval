@@ -1,5 +1,5 @@
 import { auth, db } from "./firebase-config.js";
-import { onAuthStateChanged } from "firebase/auth";
+import { } from "firebase/auth";
 import { collection, getDocs, doc, getDoc, query, where } from "firebase/firestore";
 
 // 1. VERIFICA SICUREZZA ACCESSO
@@ -15,10 +15,70 @@ onAuthStateChanged(auth, async (user) => {
     }
 });
 
-// 2. LOGICA DI RICERCA
-document.getElementById('btn-cerca').addEventListener('click', async () => {
-    const input = document.getElementById('inp-ricerca').value.toLowerCase().trim();
-    if (input.length < 2) return alert("Inserisci l'email completa o l'ID Famiglia.");
+// Funzione comune per avviare l'impersonificazione
+window.avviaImpersonate = function (targetEmail) {
+    if (!confirm(`Vuoi prendere il controllo del portale di:\n${targetEmail}?`)) return;
+
+    // Pulizia totale della sessione Admin
+    sessionStorage.clear();
+
+    // Impostazione email bersaglio per initPortal
+    sessionStorage.setItem('impersonate_email', targetEmail.toLowerCase().trim());
+
+    // Ritorno alla dashboard principale
+    window.location.href = 'index.html';
+};
+
+
+// ==========================================
+// 2. GESTIONE PULSANTE FIR (ATTIVO - APERTURA DIRETTA)
+// ==========================================
+document.getElementById('btn-fir').addEventListener('click', () => {
+    const codiceFir = document.getElementById('inp-fir').value.toLowerCase().trim();
+
+    if (codiceFir.length < 1) {
+        return alert("Inserisci il Codice FIR.");
+    }
+
+    // 1. Al codice FIR viene aggiunto '@rugbymilano.it'
+    const targetEmail = `${codiceFir}@rugbymilano.it`;
+
+    // 2 & 3. Presenta form di conferma (dentro avviaImpersonate) e apre index
+    window.avviaImpersonate(targetEmail);
+});
+
+
+// ==========================================
+// 3. GESTIONE PULSANTE EMAIL (PROSSIMAMENTE)
+// ==========================================
+document.getElementById('btn-email').addEventListener('click', async () => {
+    const emailInput = document.getElementById('inp-email').value.toLowerCase().trim();
+    if (!emailInput.includes('@')) return alert("Inserisci un'email valida.");
+
+    const container = document.getElementById('risultati-ricerca');
+    container.innerHTML = `<div class="text-center p-4"><div class="spinner-border text-danger"></div></div>`;
+
+    try {
+        const docRef = doc(db, "accounts", emailInput);
+        const snap = await getDoc(docRef);
+        let accountsTrovati = [];
+        if (snap.exists()) {
+            accountsTrovati.push({ email: snap.id, ...snap.data() });
+        }
+        renderRisultati(accountsTrovati, container);
+    } catch (e) {
+        console.error(e);
+        container.innerHTML = `<div class="alert alert-danger small">Errore: ${e.message}</div>`;
+    }
+});
+
+
+// ==========================================
+// 4. GESTIONE PULSANTE ID FAMIGLIA (PROSSIMAMENTE - CON TUA LOGICA ORIGINALE)
+// ==========================================
+document.getElementById('btn-famiglia').addEventListener('click', async () => {
+    const idFamiglia = document.getElementById('inp-famiglia').value.toLowerCase().trim();
+    if (idFamiglia.length < 2) return alert("Inserisci l'ID Famiglia.");
 
     const container = document.getElementById('risultati-ricerca');
     container.innerHTML = `<div class="text-center p-4"><div class="spinner-border text-danger"></div></div>`;
@@ -26,20 +86,10 @@ document.getElementById('btn-cerca').addEventListener('click', async () => {
     try {
         let accountsTrovati = [];
 
-        if (input.includes('@')) {
-            // CASO A: RICERCA PER EMAIL
-            const docRef = doc(db, "accounts", input);
-            const snap = await getDoc(docRef);
-            if (snap.exists()) {
-                accountsTrovati.push({ email: snap.id, ...snap.data() });
-            }
-        } else {
-            // CASO B: RICERCA PER ID FAMIGLIA
-            // Cerchiamo tutti gli account che hanno lo stesso ID_Famiglia (es. marito e moglie)
-            const q = query(collection(db, "accounts"), where("ID_Famiglia", "==", input));
-            const qSnap = await getDocs(q);
-            qSnap.forEach(d => accountsTrovati.push({ email: d.id, ...d.data() }));
-        }
+        // Ricerca per ID Famiglia su Firestore
+        const q = query(collection(db, "accounts"), where("ID_Famiglia", "==", idFamiglia));
+        const qSnap = await getDocs(q);
+        qSnap.forEach(d => accountsTrovati.push({ email: d.id, ...d.data() }));
 
         renderRisultati(accountsTrovati, container);
 
@@ -49,13 +99,14 @@ document.getElementById('btn-cerca').addEventListener('click', async () => {
     }
 });
 
-// 3. RENDERING UI
+
+// 5. RENDERING UI (Per mostrare i risultati di ID Famiglia o Email quando attivi)
 function renderRisultati(accounts, container) {
     if (accounts.length === 0) {
         container.innerHTML = `
             <div class="alert alert-warning small">
                 Nessun account trovato.<br>
-                <span style="font-size:10px;">Assicurati che l'email sia corretta o che l'ID Famiglia sia stato migrato su Firestore.</span>
+                <span style="font-size:10px;">Assicurati che i dati inseriti siano corretti.</span>
             </div>`;
         return;
     }
@@ -63,7 +114,6 @@ function renderRisultati(accounts, container) {
     let html = `<div class="text-muted mb-2" style="font-size:11px;">Account trovati: ${accounts.length}</div>`;
 
     accounts.forEach(acc => {
-        // Cerchiamo di mostrare il nome se presente, altrimenti usiamo l'email come titolo
         const nomeUtente = (acc.Cognome || acc.Nome) ? `${acc.Cognome} ${acc.Nome}`.toUpperCase() : acc.email;
 
         html += `
@@ -84,17 +134,3 @@ function renderRisultati(accounts, container) {
     });
     container.innerHTML = html;
 }
-
-// 4. ATTIVAZIONE MODALITÀ ASSISTENZA
-window.avviaImpersonate = function (targetEmail) {
-    if (!confirm(`Vuoi prendere il controllo del portale di:\n${targetEmail}?`)) return;
-
-    // Pulizia totale della sessione Admin
-    sessionStorage.clear();
-
-    // Impostazione email bersaglio per initPortal
-    sessionStorage.setItem('impersonate_email', targetEmail.toLowerCase().trim());
-
-    // Ritorno alla dashboard principale
-    window.location.href = 'index.html';
-};

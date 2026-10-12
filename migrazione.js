@@ -44,9 +44,9 @@ async function start() {
 
     const targets = {
         'accounts': { ss: ID_SS_BASE, sheet: 'Utenti_Account', coll: 'accounts', key: 'Email' },
-        'config': { ss: ID_SS_BASE, sheet: 'Config_Campi', coll: 'ui_config', key: null },
+        'config': { ss: ID_SS_BASE, sheet: 'Config_Campi', coll: 'ui_config', key: 'id_doc_firestore' }, // <-- Usa la colonna
         'staff': { ss: ID_SS_BASE, sheet: 'Staff_Ruoli', coll: 'staff_roles', key: 'Email' },
-        'access': { ss: ID_SS_BASE, sheet: 'Config_Accessi', coll: 'config_access', key: null },
+        'access': { ss: ID_SS_BASE, sheet: 'Config_Accessi', coll: 'config_access', key: 'id_doc_firestore' }, // <-- Usa la colonna
         'features': { ss: ID_SS_BASE, sheet: 'Funzionalità', coll: 'features', key: 'Nome' },
         // SHOP (Aggiornati con i tuoi nuovi nomi)
         'shop_cat': { ss: ID_SS_BASE, sheet: 'Shop_Categorie', coll: 'shop_categories', key: 'Nome Categoria' },
@@ -80,47 +80,129 @@ async function start() {
 }
 
 async function migrateSheet(sheets, spreadsheetId, sheetName, collectionName, keyField) {
-    console.log(`⏳ [${sheetName}] --> [${collectionName}]...`);
+    console.log(`\n⏳ [${sheetName}] --> [${collectionName}]...`);
     const res = await sheets.spreadsheets.values.get({ spreadsheetId, range: `${sheetName}!A:ZZ` });
     const rows = res.data.values;
-    if (!rows || rows.length === 0) return;
+    if (!rows || rows.length === 0) {
+        console.log(`   ⚠️ Foglio vuoto o non trovato.`);
+        return;
+    }
 
     const headers = rows[0].map(h => cleanKey(h));
     const dataRows = rows.slice(1);
+
     let batch = db.batch();
-    let count = 0;
+    let batchOps = 0;
+    let countRead = 0;
+    const seenIds = new Set();
+    let duplicates = 0;
+    let skippedEmpty = 0;
 
     for (let i = 0; i < dataRows.length; i++) {
+        // Salta righe vuote
+        if (!dataRows[i] || dataRows[i].length === 0 || dataRows[i].every(cell => !cell || cell.toString().trim() === '')) {
+            continue;
+        }
+
         let obj = {};
+        let docIdFromSheet = null;
+
         headers.forEach((h, idx) => {
-            let val = dataRows[i][idx] || "";
+            if (!h) return;
+            let val = dataRows[i][idx] !== undefined ? dataRows[i][idx] : "";
             const vU = val.toString().toUpperCase().trim();
 
+            // Parsing booleani
             if (vU === "TRUE" || vU === "SÌ" || vU === "SI") val = true;
             else if (vU === "FALSE" || vU === "NO") val = false;
-            // Riconoscimento automatico colonne date
+            // Parsing date
             else if (h.includes('Data') || h.includes('Valido_') || h.includes('Scadenza')) {
                 val = parseStringToDate(val);
             }
-            else val = smartParse(val);
+            // Parsing numeri / valuta
+            else {
+                val = smartParse(val);
+            }
 
-            if (h !== "id_doc_firestore") obj[h] = val;
+            // Se la colonna è id_doc_firestore, la estraiamo per usarla come ID
+            if (h === "id_doc_firestore") {
+                docIdFromSheet = val ? val.toString().trim() : null;
+            } else {
+                obj[h] = val;
+            }
         });
 
-        let docId;
-        if (sheetName === 'Config_Accessi') docId = `${(obj.Gruppo || "ALL")}_${(obj.Ordine || i).toString().padStart(3, '0')}`;
-        else if (sheetName === 'Config_Campi') docId = `${(obj.Gruppo || "ALL")}_${(obj.Profilo || "DEF")}_${(obj.Ordine || i).toString().padStart(3, '0')}`;
-        else if (keyField) docId = obj[cleanKey(keyField)]?.toString().trim();
-        else docId = db.collection(collectionName).doc().id;
+        // -------------------------------------------------------------
+        // LOGICA DI SELEZIONE DELL'ID DOCUMENTO (con priorità)
+        // -------------------------------------------------------------
+        let docId = null;
 
-        if (docId) {
-            batch.set(db.collection(collectionName).doc(docId), obj);
-            count++;
+        // 1. Se nel foglio esiste la colonna id_doc_firestore valorizzata
+        if (docIdFromSheet) {
+            docId = docIdFromSheet;
         }
-        if (count % 500 === 0) { await batch.commit(); batch = db.batch(); }
+        // 2. Se c'è un campo chiave configurato (es. Email, Nome, skuId)
+        else if (keyField) {
+            const rawKey = obj[cleanKey(keyField)];
+            if (rawKey !== undefined && rawKey !== null && rawKey.toString().trim() !== "") {
+                docId = rawKey.toString().trim();
+            }
+        }
+        // 3. Regole speciali fallback per fogli di configurazione senza colonna ID
+        else if (sheetName === 'Config_Accessi') {
+            docId = `${(obj.Gruppo || "ALL")}_${(i + 1).toString().padStart(3, '0')}`;
+        }
+        else if (sheetName === 'Config_Campi') {
+            docId = `${(obj.Gruppo || "ALL")}_${(obj.Profilo || "DEF")}_${(i + 1).toString().padStart(3, '0')}`;
+        }
+        // 4. ID autogenerato da Firestore se non c'è nessuna chiave
+        else {
+            docId = db.collection(collectionName).doc().id;
+        }
+
+        // Se l'ID contiene slash '/', li convertiamo in '-' per non creare sottocollezioni errate
+        if (docId) {
+            docId = docId.toString().replace(/\//g, '-');
+        } else {
+            skippedEmpty++;
+            console.log(`   ⚠️ Riga ${i + 2}: ID non valido o vuoto. Riga saltata.`);
+            continue;
+        }
+
+        // Rilevamento duplicati
+        if (seenIds.has(docId)) {
+            duplicates++;
+            console.log(`   ⚠️ ID DUPLICATO: "${docId}" alla riga ${i + 2} dello sheet. Sovrascriverà il precedente!`);
+        }
+        seenIds.add(docId);
+
+        // Aggiunta al batch
+        batch.set(db.collection(collectionName).doc(docId), obj);
+        countRead++;
+        batchOps++;
+
+        // Commit ogni 499 operazioni (il limite Firestore è 500)
+        if (batchOps === 499) {
+            await batch.commit();
+            batch = db.batch();
+            batchOps = 0;
+        }
     }
-    await batch.commit();
-    console.log(`   ✅ Finito: ${count} documenti.`);
+
+    // Scrive le operazioni rimanenti
+    if (batchOps > 0) {
+        await batch.commit();
+    }
+
+    // Controllo di verifica effettivo su Firestore
+    const totalInFirestore = (await db.collection(collectionName).count().get()).data().count;
+
+    console.log(`   --------------------------------------------------`);
+    console.log(`   ✅ Righe elaborate dal foglio: ${countRead}`);
+    if (duplicates > 0) console.log(`   ⚠️ Attenzione: ${duplicates} righe avevano ID duplicati e sono state sovrascritte.`);
+    if (skippedEmpty > 0) console.log(`   ⚠️ Righe scartate (senza ID): ${skippedEmpty}`);
+    console.log(`   📊 Totale documenti reali presenti in [${collectionName}]: ${totalInFirestore}`);
+    console.log(`   --------------------------------------------------`);
 }
 
 async function migrateListe(sheets, spreadsheetId) {

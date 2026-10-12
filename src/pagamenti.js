@@ -2,7 +2,7 @@ import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { addToFirestoreCart, removeFromFirestoreCart, listenToCart } from "./cart-service.js";
-import { safeSet } from "./utils.js";
+import { callGAS, safeSet } from "./utils.js";
 import { initPaypalCheckout } from "./checkout-service.js";
 import { checkSandboxMode } from "./paypal-config.js"; // Importa la funzione
 
@@ -18,7 +18,6 @@ onAuthStateChanged(auth, async (user) => {
         if (!raw) { window.location.href = "index.html"; return; }
         sharedData = JSON.parse(raw);
 
-        // L'ID Famiglia nel tuo log è nella radice
         const idFamiglia = sharedData.idFamiglia || sharedData.famiglia?.ID_Famiglia;
         if (!idFamiglia) return console.error("❌ ID Famiglia non trovato");
 
@@ -30,9 +29,14 @@ onAuthStateChanged(auth, async (user) => {
             updateCartUI();
         });
 
+        console.log("🔄 Avvio caricamento prodotti...");
         // 2. Carica Prodotti da Firestore
         await loadProducts();
 
+        // 4. Carica lo Storico Pagamenti
+        window.caricaStoricoPagamenti();
+
+        console.log("👥 Disegno selettore famiglia...");
         // 3. Disegna Bolle
         renderFamilySelector();
 
@@ -69,14 +73,20 @@ window.selectMember = (id) => {
 
 
 async function loadProducts() {
+    const container = document.getElementById('products-list-area');
     try {
         const q = query(collection(db, "payment_items"), where("isActive", "==", true));
         const snap = await getDocs(q);
         allProducts = [];
-        snap.forEach(doc => allProducts.push(doc.data()));
-        if (selectedMemberId) renderFilteredProducts();
+        snap.forEach(doc => {
+            allProducts.push(doc.data());
+        });
+        console.log("✅ Prodotti caricati da Firestore:", allProducts.length);
     } catch (err) {
-        console.error("❌ Errore Firestore:", err);
+        console.error("❌ Errore Firestore durante il caricamento prodotti:", err);
+        if (container) {
+            container.innerHTML = `<div class="text-center text-danger p-3">Errore nel caricamento dei prodotti. Controlla la console.</div>`;
+        }
     }
 }
 
@@ -90,16 +100,31 @@ window.selectMember = (id) => {
 // 3. Funzione di rendering con logica di filtraggio
 function renderFilteredProducts() {
     const container = document.getElementById('products-list-area');
-    if (!container || !selectedMemberId || allProducts.length === 0) return;
+    if (!container || !selectedMemberId) return;
 
     const member = sharedData.famiglia.data.find(m => m.IDContatto.toString() === selectedMemberId.toString());
     const ruolo = (member?.Ruolo || "").toLowerCase();
+
+    console.log("🔍 Filtraggio prodotti per membro:", member?.Nome, "Ruolo:", ruolo);
 
     const filtered = allProducts.filter(p => {
         if (ruolo.includes("atleta")) return (p.tipoAcquisto === "Atleta" || p.tipoAcquisto === "Genitore e Atleta");
         if (ruolo.includes("genitore")) return (p.tipoAcquisto === "Genitore" || p.tipoAcquisto === "Genitore e Atleta");
         return false;
     });
+
+    console.log("📦 Prodotti filtrati trovati:", filtered.length);
+
+    // Se non ci sono prodotti filtrati, rimuoviamo lo spinner e mostriamo un messaggio
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="shop-divider mb-3"></div>
+            <div class="text-center text-muted py-4">
+                <i class="fas fa-box-open fa-2x mb-2"></i>
+                <p class="small mb-0">Nessun prodotto disponibile per questo membro.</p>
+            </div>`;
+        return;
+    }
 
     container.innerHTML = `<div class="shop-divider mb-3"></div>`;
     filtered.forEach(p => {
@@ -165,20 +190,44 @@ window.prepareAddToCart = (skuId, name, price, alertMessage) => {
 
 
 window.addToCart = async (product, quantity) => {
-    const member = sharedData.famiglia.data.find(m => m.IDContatto.toString() === selectedMemberId.toString());
+    const member = sharedData.famiglia.data.find(m => m.IDContatto.toString() === selectedMemberId.toString()) || {};
     const idFam = sharedData.idFamiglia || sharedData.famiglia?.ID_Famiglia;
+    const idCPulito = selectedMemberId.toString().toLowerCase().trim();
 
+    // --- 1. RECUPERO CODICE FIR (STESSA LOGICA DI VISITE MEDICHE) ---
+    const tuttiICodici = sharedData.codici || [];
+    const rigoFIR = tuttiICodici.find(c =>
+        (c.ID_Contatto || c.IDContatto || "").toString().toLowerCase().trim() === idCPulito &&
+        (c.Tipo_Tesseramento === "FIR" || c.Ente === "FIR")
+    );
+
+    const tech = (sharedData.atleti && sharedData.atleti[idCPulito]) ? sharedData.atleti[idCPulito] : {};
+    const firFinale = rigoFIR ? rigoFIR.Codice : (tech.Codice_FIR || tech.FIR || "");
+
+    // --- 2. CATEGORIA E SQUADRA ---
+    const squadraAtleta = tech.Squadre || tech.Squadra || member.Squadra || "";
+    const categoriaAtleta = tech.Categoria_Fed || product.categoria || "";
+
+    // --- 3. CREAZIONE ELEMENTO CARRELLO ---
     const newItem = {
         tipo: "PAGAMENTO",
+        idFamiglia: idFam,
         idContatto: selectedMemberId,
-        nomeMembro: member.Nome + " " + member.Cognome,
+        nomeMembro: (member.Nome || "") + " " + (member.Cognome || ""),
+        fir: firFinale || "",                 // <--- ORA È IL VERO CODICE FIR!
+        categoria: categoriaAtleta,
+        squadra: squadraAtleta,
         skuId: product.skuId,
         nomeArticolo: product.name,
+        codiceFornitore: product.codiceFornitore || "",
+        prezzoAcquisto: parseFloat(product.costPrice || 0),
         prezzoUnitario: parseFloat(product.price),
         quantita: quantity,
         totaleRiga: parseFloat(product.price) * quantity,
         emailInserimento: auth.currentUser.email
     };
+
+    console.log("🏉 Codice FIR estratto con successo:", newItem.fir);
 
     await addToFirestoreCart(idFam, newItem);
 };
@@ -257,7 +306,6 @@ function updateCartUI() {
         if (!paypalRendered) {
             paypalRendered = true;
 
-            // Recuperiamo l'ID Famiglia e l'Email per la finalizzazione
             const idFam = sharedData.idFamiglia || sharedData.famiglia?.ID_Famiglia;
             const email = auth.currentUser.email;
 
@@ -267,10 +315,15 @@ function updateCartUI() {
                 idFam,
                 email,
                 (details) => {
-                    // Callback di successo
                     alert("Pagamento completato con successo! 🎉");
-                    // Eventuale redirect o pulizia UI locale
                     container.classList.add('d-none');
+
+                    // Diamo 1 secondo a Google Sheets per registrare e poi aggiorniamo la tabella
+                    setTimeout(() => {
+                        if (typeof window.caricaStoricoPagamenti === "function") {
+                            window.caricaStoricoPagamenti();
+                        }
+                    }, 1000);
                 }
             );
         }
@@ -339,3 +392,70 @@ function renderPayPal() {
         }
     }).render('#paypal-button-container');
 }
+
+/**
+ * Recupera e disegna lo storico dei pagamenti tramite la query veloce di Google Apps Script
+ */
+window.caricaStoricoPagamenti = async () => {
+    const tbody = document.getElementById('storico-pagamenti-tbody');
+    if (!tbody) return;
+
+    // Spinner di caricamento iniziale
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="8" class="text-center py-4 text-muted">
+                <div class="spinner-border spinner-border-sm text-danger me-2"></div> Caricamento storico pagamenti...
+            </td>
+        </tr>`;
+
+    try {
+        const idFam = sharedData?.idFamiglia || sharedData?.famiglia?.ID_Famiglia;
+        if (!idFam) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-3 text-muted">Famiglia non identificata.</td></tr>`;
+            return;
+        }
+
+        // Chiamiamo GAS: la query SQL interna su Sheet restituirà i dati in un lampo
+        const res = await callGAS("getPagamentiFamiglia", { idFamiglia: idFam });
+        const lista = res?.data || res || [];
+
+        if (!Array.isArray(lista) || lista.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" class="text-center py-4 text-muted">
+                        <i class="fas fa-folder-open me-2 fa-lg d-block mb-2"></i>Nessun pagamento registrato finora.
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        // Disegniamo la tabella
+        tbody.innerHTML = lista.map(p => {
+            const isPagato = (p.stato || "").toLowerCase().includes("pagato");
+            const badgeClass = isPagato ? "bg-success" : "bg-warning text-dark";
+
+            return `
+            <tr>
+                <td class="ps-3 fw-bold text-dark" style="font-family: monospace;">${p.idOrdine || "-"}</td>
+                <td class="text-muted">${p.dataOrdine || "-"}</td>
+                <td class="fw-bold text-dark">${p.partecipante || "-"}</td>
+                <td><span class="badge bg-light text-dark border">${p.articolo || "-"}</span></td>
+                <td class="text-center">${p.quantita || 1}</td>
+                <td class="text-end fw-bold text-dark">${parseFloat(p.totale || 0).toFixed(2)} €</td>
+                <td class="text-center">
+                    <span class="badge ${badgeClass} rounded-pill px-2 py-1" style="font-size: 10px;">${p.stato || "N/D"}</span>
+                </td>
+                <td class="pe-3 text-muted">${p.dataPagamento || "-"}</td>
+            </tr>`;
+        }).join('');
+
+    } catch (e) {
+        console.error("❌ Errore caricamento storico pagamenti:", e);
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" class="text-center py-4 text-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>Impossibile caricare i pagamenti. Riprova più tardi.
+                </td>
+            </tr>`;
+    }
+};

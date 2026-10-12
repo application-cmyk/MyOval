@@ -18,7 +18,7 @@ onAuthStateChanged(auth, (user) => {
 
         // Disegna le bolle per la famiglia
         renderAtletiSelector();
-        
+
         // Seleziona di default il membro attivo nella home
         const initialId = sharedData.famiglia.data[sharedData.selectedMemberIndex]?.IDContatto;
         if (initialId) window.selezionaAtleta(initialId);
@@ -35,7 +35,7 @@ function renderAtletiSelector() {
     container.innerHTML = sharedData.famiglia.data.map(a => `
         <div class="family-item" id="f-${a.IDContatto}" onclick="window.selezionaAtleta('${a.IDContatto}')">
             <div class="avatar-circle shadow-sm">
-                <i class="fas ${ (a.Ruolo || "").toLowerCase().includes("atleta") ? 'fa-running' : 'fa-user-tie'}"></i>
+                <i class="fas ${(a.Ruolo || "").toLowerCase().includes("atleta") ? 'fa-running' : 'fa-user-tie'}"></i>
             </div>
             <div class="family-name text-truncate small fw-bold mt-2">${a.Nome}</div>
         </div>
@@ -49,7 +49,7 @@ window.selezionaAtleta = async (id) => {
 
     const a = sharedData.famiglia.data.find(x => x.IDContatto.toString() === id.toString());
     safeSet('label-atleta-selezionato', `${a.Nome} ${a.Cognome}`);
-    
+
     // Avvia caricamento documenti da GAS
     fetchDocumenti(id);
 };
@@ -57,15 +57,19 @@ window.selezionaAtleta = async (id) => {
 async function fetchDocumenti(idContatto) {
     const tbody = document.getElementById('docs-table-body');
     const status = document.getElementById('status-message');
-    
+
     tbody.innerHTML = '';
     status.innerHTML = '<div class="spinner-border text-danger spinner-border-sm"></div><p class="text-muted small mt-2">Ricerca documenti...</p>';
 
     try {
-        const docs = await callGAS("getDocumentiAtleta", { 
-            idFamiglia: sharedData.idFamiglia, 
-            idContatto: idContatto 
+        const docs = await callGAS("getDocumentiAtleta", {
+            idFamiglia: sharedData.idFamiglia,
+            idContatto: idContatto
         });
+
+        // --- AGGIUNGI QUESTO LOG ---
+        console.log("Dati ricevuti da GAS per i documenti:", docs);
+        // ---------------------------
 
         status.innerHTML = '';
 
@@ -86,7 +90,6 @@ async function fetchDocumenti(idContatto) {
                 </td>
             </tr>
         `).join('');
-
     } catch (e) {
         status.innerHTML = `<div class="alert alert-danger small p-2">Errore recupero dati: ${e.message}</div>`;
     }

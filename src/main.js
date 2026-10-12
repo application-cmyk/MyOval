@@ -53,11 +53,29 @@ onAuthStateChanged(auth, async (user) => {
     const errorDiv = document.getElementById('auth-error');
 
     if (user) {
+        const emailCorrente = user.email.toLowerCase().trim();
+
+        // --- 🛑 CONTROLLO ANTI-LOOP DEFINITIVO ---
+        // Se questa specifica email è stata precedentemente bloccata perché non in anagrafica,
+        // la buttiamo fuori all'istante senza far partire initPortal!
+        const emailBloccata = localStorage.getItem('mg_email_bloccata');
+        if (emailBloccata === emailCorrente) {
+            console.warn("🚫 Utente in blacklist anagrafica. Forzatura logout...");
+            await signOut(auth);
+
+            // Mostriamo l'errore direttamente nella schermata di login
+            if (loadingScreen) loadingScreen.classList.add('d-none');
+            if (loginScreen) loginScreen.classList.remove('d-none');
+            if (appPortaleScreen) appPortaleScreen.classList.add('d-none');
+            if (appGestionaleScreen) appGestionaleScreen.classList.add('d-none');
+            if (errorDiv) errorDiv.innerText = "Utente non in Anagrafica. Contatta la Segreteria.";
+            return;
+        }
+
         console.log("🟢 Utente rilevato:", user.email);
-        const email = user.email.toLowerCase();
-        const username = email.split('@')[0];
+        const username = emailCorrente.split('@')[0];
         const isNumeric = /^\d+$/.test(username);
-        const isInternal = email.endsWith("@rugbymilano.it");
+        const isInternal = emailCorrente.endsWith("@rugbymilano.it");
         const isImpersonating = sessionStorage.getItem('impersonate_email');
 
         // BIVIO: PORTALE SOCI vs GESTIONALE STAFF
@@ -86,7 +104,19 @@ onAuthStateChanged(auth, async (user) => {
             try {
                 const { initPortal } = await import('./portal.js?v=35.0.0');
                 await initPortal(user);
-            } catch (err) { console.error("❌ Errore Portale:", err); }
+            } catch (err) {
+                console.error("❌ Errore Portale:", err);
+
+                // SE L'ERRORE È QUELLO DI ANAGRAFICA
+                if (err.message && err.message.includes("Utente non in Anagrafica")) {
+                    // 1. Salviamo l'email nella blacklist del browser
+                    localStorage.setItem('mg_email_bloccata', emailCorrente);
+                    // 2. Facciamo il logout da Firebase
+                    await signOut(auth);
+                    // 3. Ricarichiamo la pagina (ora il blocco all'inizio di questa funzione intercetterà l'email e fermerà il loop)
+                    window.location.reload();
+                }
+            }
 
         } else {
             // --- CASO B: STAFF (GESTIONALE) ---
@@ -96,7 +126,7 @@ onAuthStateChanged(auth, async (user) => {
             appGestionaleScreen?.classList.remove('d-none');
 
             const staffEmailLabel = document.getElementById('staff-email-display');
-            if (staffEmailLabel) staffEmailLabel.innerText = email;
+            if (staffEmailLabel) staffEmailLabel.innerText = emailCorrente;
 
             try {
                 const { initGestionale } = await import('./gestionale.js?v=2.2.0');
@@ -105,6 +135,9 @@ onAuthStateChanged(auth, async (user) => {
         }
     } else {
         // --- CASO C: DISCONNESSO ---
+        // Se l'utente fa un login pulito con un'altra email, ricordati di pulire la blacklist:
+        // (Opzionale ma pulito: localStorage.removeItem('mg_email_bloccata');)
+
         loadingScreen?.classList.add('d-none');
         loginScreen?.classList.remove('d-none');
         appPortaleScreen?.classList.add('d-none');

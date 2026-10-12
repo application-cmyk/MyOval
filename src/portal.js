@@ -1,7 +1,7 @@
 /**
  * Inizializzazione Portale con Error Handling avanzato
  */
-import { db, APP_ENV } from "./firebase-config.js";
+import { db, auth, APP_ENV } from "./firebase-config.js";
 import { doc, getDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { buildFamilyUI, selectMember } from "./anagrafica.js";
 import { callGAS, mapArraysToObjects, formattaDataRugby } from "./utils.js";
@@ -13,7 +13,7 @@ export async function initPortal(user) {
     const loading = document.getElementById('loading-overlay');
     const errorContainer = document.getElementById('global-error-container');
 
-    // --- 1. LOGICA IMPERSONATE (SuperUser Mode) ---
+    // --- 1. LOGICA IMPERSONATE ---
     const realEmail = user.email.toLowerCase().trim();
     let emailToLoad = realEmail;
     const impersonateEmail = sessionStorage.getItem('impersonate_email');
@@ -42,9 +42,13 @@ export async function initPortal(user) {
                 window.globalData = parsed;
                 console.log("%c 🚀 CACHE DATA RECOVERY: Sessione valida. ", "color: #28a745; font-weight: bold;");
 
-                // --- RE-INITIALIZE REALTIME CART ON CACHE RECOVERY ---
-                startGlobalCartListener(window.globalData.idFamiglia);
+                // LOG STATO CACHE PER TAGLIE E PRIVACY
+                console.group("📦 Verifica Taglie e Privacy da CACHE");
+                console.log("taglieKit in cache:", window.globalData.taglieKit);
+                console.log("privacyData in cache:", window.globalData.privacyData);
+                console.groupEnd();
 
+                startGlobalCartListener(window.globalData.idFamiglia);
                 renderFinalUI(loading);
                 return;
             }
@@ -91,34 +95,53 @@ export async function initPortal(user) {
             gasParams = { idFamiglia: idFamigliaDaFirestore ? idFamigliaDaFirestore.toString() : "" };
         }
 
-        // --- 4. CHIAMATA PARALLELA (RIMOZIONE getUserCart) ---
         console.log(`📡 Caricamento dati per Gruppo: ${userGroup}`);
 
         const [rawRes, uiConfig, servizi, shopArticoliSnap] = await Promise.all([
             callGAS(gasAction, gasParams),
             getUIConfigByGroup(userGroup),
             getServiziOnlineByGroup(userGroup),
-            // callGAS("getUserCart", ...) <--- RIMOZIONE EFFETTUATA QUI
             getDocs(collection(db, "shop_items"))
         ]);
 
-        if (!rawRes || !rawRes.famiglia) throw new Error("Dati non ricevuti dal server Google.");
+        // Controllo se l'utente esiste e ha dati validi nella famiglia
+        const famigliaOggetti = rawRes && rawRes.famiglia ? mapArraysToObjects(rawRes.famiglia) : [];
+        if (famigliaOggetti.length === 0) {
+            throw new Error("Utente non in Anagrafica. Contatta la Segreteria");
+        }
+
+        // --- 🔍 DIAGNOSTICA DATI GREZZI DA GOOGLE (GAS) ---
+        console.group("📡 Diagnostica Risposta Server GAS (rawRes)");
+        console.log("Tutte le proprietà in rawRes:", Object.keys(rawRes));
+        console.log("rawRes.taglie grezzo:", rawRes.taglie);
+        console.log("rawRes.privacy grezzo:", rawRes.privacy);
+        console.groupEnd();
 
         const articoliShop = shopArticoliSnap.docs.map(d => ({ ID_Articolo: d.id, ...d.data() }));
-        const famigliaOggetti = mapArraysToObjects(rawRes.famiglia);
 
-        const creaMappa = (arr) => {
+        const creaMappa = (arr, nomeMappa) => {
             const m = {};
-            (arr || []).forEach(o => {
-                const id = (o.IDContatto || o.ID_Contatto || "").toString().toLowerCase().trim();
-                if (id) m[id] = o;
+            (arr || []).forEach((o, index) => {
+                const id = (o.IDContatto || o.ID_Contatto || o.IdContatto || o.ID_Tesserato || o.ID || "").toString().toLowerCase().trim();
+                if (id) {
+                    m[id] = o;
+                } else if (index === 0) {
+                    console.warn(`⚠️ [${nomeMappa}] Attenzione: Impossibile trovare IDContatto nel primo oggetto! Chiavi disponibili:`, Object.keys(o));
+                }
             });
             return m;
         };
 
+        const taglieMappate = creaMappa(mapArraysToObjects(rawRes.taglie), "Taglie");
+        const privacyMappate = creaMappa(mapArraysToObjects(rawRes.privacy), "Privacy");
+
+        console.group("🗺️ Mappe Create");
+        console.log("taglieKit Mappato:", taglieMappate);
+        console.log("privacyData Mappato:", privacyMappate);
+        console.groupEnd();
+
         // --- 5. LOGICA DI SICUREZZA ID FAMIGLIA ---
         let idFamigliaFinale = idFamigliaDaFirestore || (famigliaOggetti.length > 0 ? famigliaOggetti[0].ID_Famiglia : "N/D");
-        console.log(`🏠 ID FAMIGLIA VALIDATO: ${idFamigliaFinale}`);
 
         // --- 6. AVVIO LISTENER CARRELLO FIRESTORE ---
         startGlobalCartListener(idFamigliaFinale);
@@ -130,14 +153,14 @@ export async function initPortal(user) {
             userGroup: userGroup,
             idFamiglia: idFamigliaFinale.toString(),
             famiglia: { data: famigliaOggetti },
-            atleti: creaMappa(mapArraysToObjects(rawRes.atleti)),
-            taglieKit: creaMappa(mapArraysToObjects(rawRes.taglie)),
-            privacyData: creaMappa(mapArraysToObjects(rawRes.privacy)),
+            atleti: creaMappa(mapArraysToObjects(rawRes.atleti), "Atleti"),
+            taglieKit: taglieMappate,
+            privacyData: privacyMappate,
             codici: mapArraysToObjects(rawRes.codici),
             config: uiConfig,
             funzioni: servizi,
             articoli: articoliShop,
-            cart: [], // Verrà popolato in tempo reale dal listener
+            cart: [],
             currentProfile: "ASSOCIATO",
             selectedMemberIndex: 0
         };
@@ -147,7 +170,24 @@ export async function initPortal(user) {
 
     } catch (error) {
         console.error("❌ Errore Portale:", error);
-        if (typeof mostraErroreBloccante === "function") mostraErroreBloccante(error.message);
+
+        // Spegniamo il loader se attivo
+        if (loading) loading.style.setProperty('display', 'none', 'important');
+
+        let messaggioUtente = error.message;
+        let tipoErrore = "RETE"; // Default per errori di connessione/CORS o generici
+
+        // Distinguiamo se è un errore di anagrafica o di rete/CORS
+        if (error.message.includes("Utente non in Anagrafica")) {
+            tipoErrore = "ANAGRAFICA";
+        } else if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+            messaggioUtente = "Impossibile connettersi al server. Verifica la tua connessione internet o i permessi dello script.";
+        }
+
+        // Chiamiamo la funzione grafica passandogli il tipo di errore
+        if (typeof mostraErroreBloccante === "function") {
+            mostraErroreBloccante(messaggioUtente, tipoErrore);
+        }
     }
 }
 
@@ -221,14 +261,70 @@ async function renderFinalUI(loading) {
 }
 
 
-function mostraErroreBloccante(msg) {
-    const errCont = document.getElementById('global-error-container');
-    const errMsg = document.getElementById('global-error-msg');
-    if (errCont && errMsg) {
-        errMsg.innerText = msg;
-        errCont.classList.remove('d-none');
+export function mostraErroreBloccante(messaggio, tipoErrore = "RETE") {
+    const errorContainer = document.getElementById('global-error-container');
+
+    let titolo = "⚠️ Attenzione";
+    let testoBottone = "Riprova";
+    let azioneBottone = () => window.location.reload();
+
+    if (tipoErrore === "ANAGRAFICA") {
+        titolo = "❌ Accesso Negato";
+        testoBottone = "Esci e Torna al Login";
+
+        azioneBottone = async () => {
+            // 1. Salviamo l'email nella blacklist del browser per evitare che il router la ricarichi
+            const currentUser = auth.currentUser;
+            if (currentUser && currentUser.email) {
+                localStorage.setItem('mg_email_bloccata', currentUser.email.toLowerCase().trim());
+            }
+
+            // 2. Puliamo eventuali iframe (come fai nel tuo logout)
+            const iframe = document.getElementById('gestionale-iframe');
+            if (iframe) iframe.src = "about:blank";
+
+            // 3. Pulizia di sessione
+            sessionStorage.clear();
+
+            // 4. Eseguiamo il logout di Firebase
+            try {
+                if (typeof auth !== 'undefined' && auth) {
+                    await auth.signOut();
+                }
+            } catch (err) {
+                console.error("Errore durante il logout:", err);
+            }
+
+            // 5. Ricarichiamo la pagina in modo pulito (a questo punto scatterà il blocco anti-loop e l'utente resterà al login)
+            window.location.replace(window.location.pathname);
+        };
+    }
+
+    if (errorContainer) {
+        errorContainer.innerHTML = `
+            <div class="alert alert-danger text-center p-4 shadow-lg mx-auto" role="alert" style="max-width: 500px; margin-top: 50px;">
+                <h4 class="alert-heading">${titolo}</h4>
+                <hr>
+                <p class="mb-4 fs-5">${messaggio}</p>
+                <button id="btn-azione-errore" class="btn btn-dark btn-lg w-100 shadow-sm">
+                    ${testoBottone}
+                </button>
+            </div>
+        `;
+
+        errorContainer.classList.remove('d-none');
+
+        const btn = document.getElementById('btn-azione-errore');
+        if (btn) {
+            btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                btn.innerText = "Disconnessione in corso...";
+                await azioneBottone();
+            });
+        }
     } else {
-        alert(msg);
+        alert(messaggio);
+        azioneBottone();
     }
 }
 
@@ -271,13 +367,22 @@ async function getUIConfigByGroup(groupName) {
 
         const configPerProfilo = { "ASSOCIATO": [], "ATLETA": [] };
 
+        // --- HELPER PER CONVERTIRE IN BOOLEANO QUALSIASI FORMATO (true, "true", "TRUE", "SI", 1) ---
+        const toBool = (val) => {
+            if (val === true || val === 1) return true;
+            if (typeof val === "string") {
+                const s = val.trim().toLowerCase();
+                return s === "true" || s === "si" || s === "sì" || s === "1" || s === "vero";
+            }
+            return false;
+        };
+
         configSnap.forEach(docSnap => {
             const f = docSnap.data();
             const pName = (f.Profilo || "ASSOCIATO").toUpperCase().trim();
             if (!configPerProfilo[pName]) configPerProfilo[pName] = [];
 
             let opzioni = [];
-            // Normalizziamo per il controllo logico ma teniamo l'originale per il log
             const tipoInputOriginale = f.Tipo_Input || "";
             const tipoInputLower = tipoInputOriginale.toLowerCase().trim();
 
@@ -289,13 +394,11 @@ async function getUIConfigByGroup(groupName) {
                     const key = rawOpt.split(":")[1].trim().toUpperCase();
                     opzioni = dizionario[key] || [];
                 } else if (rawUpper.startsWith("ARTICOLO:")) {
-                    // Restituiamo la stringa per l'anagrafica.js (Scenario B)
                     opzioni = rawOpt;
                 } else if (rawOpt) {
                     opzioni = rawOpt.split(',').map(s => s.trim());
                 }
 
-                // --- LOG DI TRACCIAMENTO SPECIFICO PER MULTI-LISTA ---
                 if (tipoInputLower === "multi-lista") {
                     console.group(`✨ Tracciamento Campo Multi-Lista: ${f.ID_Campo}`);
                     console.log("Valore originale in DB:", tipoInputOriginale);
@@ -305,15 +408,20 @@ async function getUIConfigByGroup(groupName) {
                 }
             }
 
+            // --- LETTURA TOLLERANTE DEI CAMPI (gestisce maiuscole, minuscole, underscore e stringhe) ---
+            const rawReadonly = f.Readonly ?? f.ReadOnly ?? f.readOnly ?? f.readonly ?? f.Read_Only ?? f.Sola_Lettura ?? f.SolaLettura;
+            const rawRequired = f.Obbligatorio ?? f.Required ?? f.required;
+            const rawVisibile = f.Visibile ?? f.visibile;
+
             configPerProfilo[pName].push({
                 id: f.ID_Campo,
                 label: f.Etichetta || f.ID_Campo,
                 sezione: f.Sezione || "Generale",
                 larghezza: parseInt(f.Larghezza_3__4__6_12 || f.Larghezza || 4),
-                tipoInput: tipoInputLower, // Usiamo il lower per coerenza nel rendering
-                required: f.Obbligatorio === true,
-                readonly: f.Readonly === true,
-                visibile: f.Visibile === true,
+                tipoInput: tipoInputLower,
+                required: toBool(rawRequired),
+                readonly: toBool(rawReadonly), // <--- ORA È FLESSIBILE E ROBUSTO!
+                visibile: toBool(rawVisibile),
                 ordine: parseInt(f.Ordine) || 0,
                 sottotitolo: f.Sottotitolo_Help_Text || "",
                 opzioni: opzioni

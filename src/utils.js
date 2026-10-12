@@ -1,6 +1,6 @@
 import { APP_ENV } from "./firebase-config.js";
 
-const GAS_URL = "https://script.google.com/macros/s/AKfycbyt5jq-GUb98_V5crrCBhZt4OQzaRxsrOf86cj-c3x-sGnhLgPUam4IhbEaFj5dBEExQg/exec";
+const GAS_URL = "https://script.google.com/macros/s/AKfycby5DiexAINTnmRLnWtbdg-YlFWDbVP07FS2ec79gUW3Wz6ik-tJilVB0rYZsjoE938scw/exec";
 
 export function formattaDataRugby(val) {
     if (!val || val === "" || val === "null" || val === undefined) return "-";
@@ -30,35 +30,106 @@ export function formatEuro(v) {
  */
 export async function callGAS(action, params = {}) {
     try {
-        // Usiamo APP_ENV importato per sapere dove siamo
-        const currentEnv = APP_ENV || "staging";
-
-        console.log(`📡 Chiamata Bridge [POST] [${currentEnv}]: ${action}`);
+        // Usa la costante globale APP_ENV se definita, altrimenti 'staging'
+        const currentEnv = (typeof APP_ENV !== 'undefined' ? APP_ENV : "staging");
 
         const response = await fetch(GAS_URL, {
             method: 'POST',
             mode: 'cors',
-            // 2. Aggiungiamo l'ambiente nel body inviato a GAS
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify({
-                action,
-                env: currentEnv, // <--- Passiamo l'ambiente a GAS
-                params
+                action: action,
+                env: currentEnv, // <-- Qui passiamo currentEnv, NON appEnv!
+                params: params
             })
         });
 
-        if (!response.ok) throw new Error("Errore di rete verso Apps Script");
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ Errore HTTP ${response.status} da GAS per [${action}]:`, errorText);
+            throw new Error(`Errore del server (${response.status})`);
+        }
 
         const res = await response.json();
-
         if (res.success === false) {
             throw new Error(res.error || "Errore lato GAS");
         }
 
         return res.data;
+
     } catch (e) {
         console.error(`❌ Errore Bridge GAS [${action}]:`, e);
+
+        let messaggioUtente = e.message;
+
+        if (e instanceof TypeError && e.message.includes('Failed to fetch')) {
+            messaggioUtente = "Errore connessione server. Riprova per verificare se il servizio è temporaneamente non disponibile.";
+        }
+
+        if (typeof mostraErroreCriticoA1Video === 'function') {
+            mostraErroreCriticoA1Video(messaggioUtente);
+        }
+
         throw e;
     }
+}
+
+// Funzione di supporto per mostrare un popup/overlay bloccante con richiesta di ricarica
+function mostraErroreCriticoA1Video(messaggio) {
+    // Controlla se esiste già un popup di errore per evitarne doppi
+    if (document.getElementById('gas-critical-error-overlay')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'gas-critical-error-overlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0; left: 0; width: 100vw; height: 100vh;
+        background: rgba(0, 0, 0, 0.85);
+        z-index: 999999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-family: Arial, sans-serif;
+    `;
+
+    overlay.innerHTML = `
+        <div style="
+            background: white; 
+            padding: 30px; 
+            border-radius: 12px; 
+            max-width: 400px; 
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        ">
+            <div style="font-size: 40px; margin-bottom: 15px;">⚠️</div>
+            <h3 style="color: #d9534f; margin-bottom: 10px; font-size: 20px;">Ops, si è verificato un problema</h3>
+            <p style="color: #666; font-size: 14px; margin-bottom: 20px;">
+                Non è stato possibile completare l'operazione con il server. Potrebbe essersi verificata un'interruzione temporanea della connessione.
+            </p>
+            <p style="color: #999; font-size: 11px; margin-bottom: 20px; word-break: break-all;">
+                Dettaglio: ${messaggio}
+            </p>
+            <button id="btn-reload-app" style="
+                background: #d9534f; 
+                color: white; 
+                border: none; 
+                padding: 10px 20px; 
+                font-size: 14px; 
+                font-weight: bold; 
+                border-radius: 6px; 
+                cursor: pointer;
+                width: 100%;
+            ">
+                Aggiorna Pagina
+            </button>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    document.getElementById('btn-reload-app').addEventListener('click', () => {
+        window.location.reload();
+    });
 }
 
 

@@ -9,9 +9,9 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="style.css">
 
-    <!-- SDK PAYPAL (Client ID Live dal tuo Code.gs) -->
+    <!-- SDK PAYPAL -->
     <script
-        src="https://www.paypal.com/sdk/js?client-id=AcnRqEqbrhdy0HfvREZ_BPSPnhGl375ww7j8FKTTPgQUbaSlDx61fWjHgcBoD1_P6OyuY2UInuuER87C&currency=EUR&intent=capture"></script>
+        src="https://www.paypal.com/sdk/js?client-id=AcnRqEqbrhdy0HfvREZ_BPSPnhGl375ww7j8FKTTPgQUbaSlDx61fWjHgcBoD1_P6OyuY2UInuuER87C&currency=EUR"></script>
 
     <script type="importmap">
     {
@@ -43,39 +43,34 @@
         </div>
     </nav>
 
-    <div class="container mt-5 pt-5">
+    <div class="container mt-5 pt-5 mb-5">
         <div class="row justify-content-center">
-            <div class="col-lg-10 col-xl-8">
+            <div class="col-lg-10 col-xl-9">
 
                 <!-- SELETTORE FAMIGLIA -->
-                <div class="family-header text-center mb-2 mt-3">
-                    <small class="text-muted fw-bold text-uppercase" style="font-size: 10px; letter-spacing: 1px;">Per
-                        chi vuoi effettuare il pagamento?</small>
+                <div class="family-header text-center mb-2">
+                    <small class="text-muted fw-bold text-uppercase" style="font-size: 10px; letter-spacing: 1px;">
+                        Per chi vuoi effettuare il pagamento?
+                    </small>
                 </div>
                 <div class="family-nav mb-4" id="pagamenti-family-selector"></div>
 
-                <!-- CARRELLO (STILE IMMAGINE) -->
+                <!-- CARRELLO -->
                 <div id="cart-container" class="cart-card shadow-sm d-none mb-4 animate__animated animate__fadeIn">
-                    <!-- Header -->
                     <div class="cart-header">
                         <span><i class="fas fa-shopping-cart me-2" style="color: #dc3545;"></i> RIEPILOGO
                             PAGAMENTI</span>
                         <span class="badge rounded-pill" id="cart-items-badge">0 Articoli</span>
                     </div>
 
-                    <!-- Table Head (Solo Desktop) -->
                     <div class="cart-table-head d-none d-md-flex row m-0">
                         <div class="col-6">Beneficiario</div>
                         <div class="col-3 text-center">Listino</div>
                         <div class="col-3 text-end">Totale</div>
                     </div>
 
-                    <!-- Lista Articoli -->
-                    <div id="cart-rows-container">
-                        <!-- Righe iniettate da JS -->
-                    </div>
+                    <div id="cart-rows-container"></div>
 
-                    <!-- Footer -->
                     <div class="cart-footer">
                         <div class="row align-items-center">
                             <div class="col-6">
@@ -83,7 +78,6 @@
                                 <div class="total-amount" id="cart-total-display">0,00 €</div>
                             </div>
                             <div class="col-6 text-end">
-                                <!-- Per ora è un tasto, poi qui renderizzeremo PayPal -->
                                 <div id="paypal-button-container">
                                     <button class="btn btn-conferma-procedi" id="btn-finto-procedi">
                                         Conferma e Procedi <i class="fas fa-arrow-right ms-2"></i>
@@ -93,10 +87,50 @@
                         </div>
                     </div>
                 </div>
+
                 <!-- LISTA PRODOTTI -->
-                <div id="products-list-area">
+                <div id="products-list-area" class="mb-5">
                     <div class="text-center p-5">
                         <div class="spinner-border text-danger"></div>
+                    </div>
+                </div>
+
+                <!-- SEZIONE STORICO: PAGAMENTI EFFETTUATI (MODIFICA 2) -->
+                <div class="card shadow-sm border-0 rounded-4 overflow-hidden mt-4">
+                    <div class="card-header bg-dark text-white d-flex align-items-center justify-content-between py-3">
+                        <span class="fw-bold fs-6">
+                            <i class="fas fa-receipt me-2 text-danger"></i>PAGAMENTI EFFETTUATI
+                        </span>
+                        <button class="btn btn-sm btn-outline-light rounded-pill px-3"
+                            onclick="window.caricaStoricoPagamenti()">
+                            <i class="fas fa-sync-alt me-1"></i> Aggiorna
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0" style="font-size: 13px;">
+                                <thead class="table-light">
+                                    <tr style="font-size: 11px; text-transform: uppercase; color: #777;">
+                                        <th class="ps-3 py-2">ID Ordine</th>
+                                        <th class="py-2">Data Ordine</th>
+                                        <th class="py-2">Partecipante</th>
+                                        <th class="py-2">Articolo</th>
+                                        <th class="text-center py-2">Q.tà</th>
+                                        <th class="text-end py-2">Totale</th>
+                                        <th class="text-center py-2">Stato</th>
+                                        <th class="pe-3 py-2">Data Pagamento</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="storico-pagamenti-tbody">
+                                    <tr>
+                                        <td colspan="8" class="text-center py-4 text-muted">
+                                            <div class="spinner-border spinner-border-sm text-danger me-2"></div>
+                                            Caricamento storico...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 

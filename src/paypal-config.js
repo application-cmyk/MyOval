@@ -29,13 +29,14 @@ const getDetectedMode = () => {
 
 export const PAYPAL_CONFIG = {
     mode: getDetectedMode(),
-
     sandbox: {
-        clientId: 'AQtEM289jxBtU26Lxkz_N0bokhpYW0DhNiCDUTmAGZkjgaeLZRqQzBC-ueaMktDbwVpsxxpRkILmKqYB',
+        clientId: 'AdT_SEQq-cbnQQsCVDrZaPbOGcyJroPz75q5jfhe58MVazj0qnHgoW5AfYQDeD7PB6BdH8ztfhLJjukN',
+        secret: 'EDFFKc52yITMPOpn8RvRtMgTbBfRLFsC2s0SqqR89CKA229J0uow_n-PYm3D9w9TKvgwyMTGCurn6FmH', // <-- Inseriscilo qui
         envTag: 'SANDBOX'
     },
     live: {
         clientId: 'AcnRqEqbrhdy0HfvREZ_BPSPnhGl375ww7j8FKTTPgQUbaSlDx61fWjHgcBoD1_P6OyuY2UInuuER87C',
+        secret: 'EMgR7FjFvU74iUFP618bztrDO5trWwLsTQPNJYoy0URrKMjnu-yvQmPSi3-8Qf2t6RbTfgNRMHAaEefF', // <-- Già ce l'avevi
         envTag: 'PRODUCTION'
     }
 };
