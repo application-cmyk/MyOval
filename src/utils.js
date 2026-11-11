@@ -1,6 +1,6 @@
 import { APP_ENV } from "./firebase-config.js";
 
-const GAS_URL = "https://script.google.com/macros/s/AKfycby5DiexAINTnmRLnWtbdg-YlFWDbVP07FS2ec79gUW3Wz6ik-tJilVB0rYZsjoE938scw/exec";
+const GAS_URL = "https://script.google.com/macros/s/AKfycbzIM1zY6ifZF0zEPuwbDsQVeEfqyP1gbsgxH3BDYhOMaUp7OJzaCM9kzkus0lQPsOZxoQ/exec";
 
 export function formattaDataRugby(val) {
     if (!val || val === "" || val === "null" || val === undefined) return "-";
