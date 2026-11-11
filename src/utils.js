@@ -1,6 +1,6 @@
-import { APP_ENV } from "./firebase-config.js";
+import { APP_ENV, GESTIONE_BASE_URL } from "./firebase-config.js";
 
-const GAS_URL = "https://script.google.com/macros/s/AKfycbzIM1zY6ifZF0zEPuwbDsQVeEfqyP1gbsgxH3BDYhOMaUp7OJzaCM9kzkus0lQPsOZxoQ/exec";
+const GAS_URL = "https://script.google.com/macros/s/AKfycbzUfW2C684J6OH-Z15eoeiVIEL1ZWL3HeNDQJbafr9DztnM9b2fEukyCx6xJjKKPsNHJA/exec";
 
 export function formattaDataRugby(val) {
     if (!val || val === "" || val === "null" || val === undefined) return "-";
@@ -162,10 +162,11 @@ export function resolveUrlParams(url, data = {}) {
 
     let resolvedUrl = url;
     const replacements = {
+        "<GESTIONE_URL>": GESTIONE_BASE_URL, // <--- Usa direttamente la costante importata
         "<EMAIL>": encodeURIComponent(data.email || ""),
         "<FAMIGLIA>": encodeURIComponent(data.idFamiglia || ""),
         "<CONTATTO>": encodeURIComponent(data.idContatto || ""),
-        "<ENV>": encodeURIComponent(APP_ENV) // <--- Utile se vuoi usarlo nei link del DB
+        "<ENV>": encodeURIComponent(APP_ENV)
     };
 
     for (const [placeholder, value] of Object.entries(replacements)) {

@@ -11,9 +11,9 @@ const isClean = args[2] ? args[2].toLowerCase() === 'clean' : false;
 const keyFile = env === "prod" ? "./service-account-prod.json" : "./service-account-staging.json";
 const serviceAccount = require(keyFile);
 
-// 2. DIVERSIFICAZIONE SPREADSHEET ID
-const ID_SS_STAGING = "1FnMM8dOJ_qzbjw9TOVIrEhlOqiUrFAR6tMIb12LeW-E";
-const ID_SS_PROD = "1_SZlQtpiRQhTsQEvFCCkCE3ODzQNrhPbIV7yzntqFT8"; // <--- Cambialo!
+// 2. DIVERSIFICAZIONE SPREADSHEET ID (Unico file di riferimento per ambiente)
+const ID_SS_STAGING = "1_SZlQtpiRQhTsQEvFCCkCE3ODzQNrhPbIV7yzntqFT8";
+const ID_SS_PROD = "1_SZlQtpiRQhTsQEvFCCkCE3ODzQNrhPbIV7yzntqFT8"; // <--- Cambialo se necessario!
 
 const ID_SS_BASE = env === "prod" ? ID_SS_PROD : ID_SS_STAGING;
 
@@ -22,10 +22,21 @@ const db = getFirestore();
 
 const cleanKey = (k) => k ? k.toString().trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '') : "";
 
-// Funzione per convertire stringhe sporche (€, virgole) in numeri veri
+// Converte stringhe valuta/numeri e stringhe JSON (array/oggetti)
 const smartParse = (val) => {
     if (typeof val !== 'string') return val;
-    let s = val.replace('€', '').replace(/\s/g, '').replace(',', '.').trim();
+    const trimmed = val.trim();
+
+    // Riconoscimento automatico JSON (oggetti/array esportati)
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try {
+            return JSON.parse(trimmed);
+        } catch (e) {
+            // Se non è JSON valido prosegue
+        }
+    }
+
+    let s = trimmed.replace('€', '').replace(/\s/g, '').replace(',', '.');
     if (s === "" || isNaN(s)) return val;
     return Number(s);
 };
@@ -33,6 +44,10 @@ const smartParse = (val) => {
 async function start() {
     if (!cmd) {
         console.log("\n❌ Uso: node migrazione.js [TARGET] [ENV] [clean]");
+        console.log("Esempi: node migrazione.js all staging");
+        console.log("        node migrazione.js settings prod");
+        console.log("        node migrazione.js stagione staging clean");
+        console.log("        node migrazione.js users staging");
         process.exit(1);
     }
 
@@ -44,25 +59,25 @@ async function start() {
 
     const targets = {
         'accounts': { ss: ID_SS_BASE, sheet: 'Utenti_Account', coll: 'accounts', key: 'Email' },
-        'config': { ss: ID_SS_BASE, sheet: 'Config_Campi', coll: 'ui_config', key: 'id_doc_firestore' }, // <-- Usa la colonna
+        'config': { ss: ID_SS_BASE, sheet: 'Config_Campi', coll: 'ui_config', key: 'id_doc_firestore' },
         'staff': { ss: ID_SS_BASE, sheet: 'Staff_Ruoli', coll: 'staff_roles', key: 'Email' },
-        'access': { ss: ID_SS_BASE, sheet: 'Config_Accessi', coll: 'config_access', key: 'id_doc_firestore' }, // <-- Usa la colonna
+        'access': { ss: ID_SS_BASE, sheet: 'Config_Accessi', coll: 'config_access', key: 'id_doc_firestore' },
         'features': { ss: ID_SS_BASE, sheet: 'Funzionalità', coll: 'features', key: 'Nome' },
-        // SHOP (Aggiornati con i tuoi nuovi nomi)
         'shop_cat': { ss: ID_SS_BASE, sheet: 'Shop_Categorie', coll: 'shop_categories', key: 'Nome Categoria' },
         'shop_art': { ss: ID_SS_BASE, sheet: 'Shop_Articoli', coll: 'shop_items', key: 'Nome Articolo' },
         'shop_tar': { ss: ID_SS_BASE, sheet: 'Shop_Tariffe', coll: 'shop_rates', key: 'ID_Tariffa' },
         'shop_sco': { ss: ID_SS_BASE, sheet: 'Shop_Sconti', coll: 'shop_discounts', key: 'Nome_Sconto' },
-        // PAGAMENTI
-        'payments': {
-            ss: ID_SS_BASE, sheet: 'Pagamenti', coll: 'payment_items', key: 'skuId' // <--- Deve corrispondere al nuovo nome colonna
-        }
+        'payments': { ss: ID_SS_BASE, sheet: 'Pagamenti', coll: 'payment_items', key: 'skuId' },
 
+        // --- NUOVI TARGET ---
+        'stagione': { ss: ID_SS_BASE, sheet: 'stagione', coll: 'stagione', key: 'id_doc_firestore' },
+        'users': { ss: ID_SS_BASE, sheet: 'users', coll: 'users', key: 'id_doc_firestore' }
     };
 
     try {
         console.log(`\n🚀 MIGRAZIONE [${env.toUpperCase()}]`);
-        if (cmd === 'liste') {
+
+        if (cmd === 'liste' || cmd === 'settings') {
             await migrateListe(sheets, ID_SS_BASE);
         } else if (targets[cmd]) {
             const t = targets[cmd];
@@ -74,9 +89,14 @@ async function start() {
                 await migrateSheet(sheets, targets[k].ss, targets[k].sheet, targets[k].coll, targets[k].key);
             }
             await migrateListe(sheets, ID_SS_BASE);
+        } else {
+            console.log(`❌ Target "${cmd}" non trovato.`);
         }
+
         console.log("\n✅ OPERAZIONE COMPLETATA!");
-    } catch (err) { console.error("\n❌ ERRORE:", err.message); }
+    } catch (err) {
+        console.error("\n❌ ERRORE:", err.message);
+    }
 }
 
 async function migrateSheet(sheets, spreadsheetId, sheetName, collectionName, keyField) {
@@ -119,12 +139,12 @@ async function migrateSheet(sheets, spreadsheetId, sheetName, collectionName, ke
             else if (h.includes('Data') || h.includes('Valido_') || h.includes('Scadenza')) {
                 val = parseStringToDate(val);
             }
-            // Parsing numeri / valuta
+            // Parsing numeri / valuta / array / json
             else {
                 val = smartParse(val);
             }
 
-            // Se la colonna è id_doc_firestore, la estraiamo per usarla come ID
+            // Se la colonna è id_doc_firestore la usiamo come ID documento
             if (h === "id_doc_firestore") {
                 docIdFromSheet = val ? val.toString().trim() : null;
             } else {
@@ -133,55 +153,53 @@ async function migrateSheet(sheets, spreadsheetId, sheetName, collectionName, ke
         });
 
         // -------------------------------------------------------------
-        // LOGICA DI SELEZIONE DELL'ID DOCUMENTO (con priorità)
+        // LOGICA ID DOCUMENTO
         // -------------------------------------------------------------
         let docId = null;
 
-        // 1. Se nel foglio esiste la colonna id_doc_firestore valorizzata
+        // 1. Priorità assoluta alla colonna id_doc_firestore (se valorizzata)
         if (docIdFromSheet) {
             docId = docIdFromSheet;
         }
-        // 2. Se c'è un campo chiave configurato (es. Email, Nome, skuId)
+        // 2. Colonna chiave alternativa (es. Email, Nome, skuId)
         else if (keyField) {
             const rawKey = obj[cleanKey(keyField)];
             if (rawKey !== undefined && rawKey !== null && rawKey.toString().trim() !== "") {
                 docId = rawKey.toString().trim();
             }
         }
-        // 3. Regole speciali fallback per fogli di configurazione senza colonna ID
+        // 3. Fallback speciali per configurazioni prive di chiavi
         else if (sheetName === 'Config_Accessi') {
             docId = `${(obj.Gruppo || "ALL")}_${(i + 1).toString().padStart(3, '0')}`;
         }
         else if (sheetName === 'Config_Campi') {
             docId = `${(obj.Gruppo || "ALL")}_${(obj.Profilo || "DEF")}_${(i + 1).toString().padStart(3, '0')}`;
         }
-        // 4. ID autogenerato da Firestore se non c'è nessuna chiave
+        // 4. Auto-generazione Firestore
         else {
             docId = db.collection(collectionName).doc().id;
         }
 
-        // Se l'ID contiene slash '/', li convertiamo in '-' per non creare sottocollezioni errate
+        // Sanitizzazione caratteri speciali per Firestore
         if (docId) {
             docId = docId.toString().replace(/\//g, '-');
         } else {
             skippedEmpty++;
-            console.log(`   ⚠️ Riga ${i + 2}: ID non valido o vuoto. Riga saltata.`);
+            console.log(`   ⚠️ Riga ${i + 2}: ID non valido. Riga saltata.`);
             continue;
         }
 
-        // Rilevamento duplicati
+        // Controllo duplicati
         if (seenIds.has(docId)) {
             duplicates++;
-            console.log(`   ⚠️ ID DUPLICATO: "${docId}" alla riga ${i + 2} dello sheet. Sovrascriverà il precedente!`);
+            console.log(`   ⚠️ ID DUPLICATO: "${docId}" alla riga ${i + 2}. Sovrascriverà il precedente.`);
         }
         seenIds.add(docId);
 
-        // Aggiunta al batch
         batch.set(db.collection(collectionName).doc(docId), obj);
         countRead++;
         batchOps++;
 
-        // Commit ogni 499 operazioni (il limite Firestore è 500)
         if (batchOps === 499) {
             await batch.commit();
             batch = db.batch();
@@ -189,57 +207,66 @@ async function migrateSheet(sheets, spreadsheetId, sheetName, collectionName, ke
         }
     }
 
-    // Scrive le operazioni rimanenti
     if (batchOps > 0) {
         await batch.commit();
     }
 
-    // Controllo di verifica effettivo su Firestore
     const totalInFirestore = (await db.collection(collectionName).count().get()).data().count;
 
     console.log(`   --------------------------------------------------`);
     console.log(`   ✅ Righe elaborate dal foglio: ${countRead}`);
-    if (duplicates > 0) console.log(`   ⚠️ Attenzione: ${duplicates} righe avevano ID duplicati e sono state sovrascritte.`);
-    if (skippedEmpty > 0) console.log(`   ⚠️ Righe scartate (senza ID): ${skippedEmpty}`);
-    console.log(`   📊 Totale documenti reali presenti in [${collectionName}]: ${totalInFirestore}`);
+    if (duplicates > 0) console.log(`   ⚠️ ID duplicati sovrascritti: ${duplicates}`);
+    if (skippedEmpty > 0) console.log(`   ⚠️ Righe saltate (ID mancante): ${skippedEmpty}`);
+    console.log(`   📊 Totale documenti in Firestore [${collectionName}]: ${totalInFirestore}`);
     console.log(`   --------------------------------------------------`);
 }
 
 async function migrateListe(sheets, spreadsheetId) {
-    const res = await sheets.spreadsheets.values.get({ spreadsheetId, range: 'Liste!A:Z' });
-    if (!res.data.values) return;
+    console.log(`\n⏳ [Liste] --> [settings/liste_valori]...`);
+    const res = await sheets.spreadsheets.values.get({ spreadsheetId, range: 'Liste!A:ZZ' });
+    if (!res.data.values || res.data.values.length === 0) {
+        console.log(`   ⚠️ Foglio "Liste" vuoto.`);
+        return;
+    }
     let listeObj = {};
-    res.data.values[0].forEach((h, i) => {
-        if (h) listeObj[h.toUpperCase().trim()] = res.data.values.slice(1).map(r => r[i]).filter(Boolean);
+    const headers = res.data.values[0];
+    const dataRows = res.data.values.slice(1);
+
+    headers.forEach((h, colIdx) => {
+        if (h && h.trim()) {
+            const colName = h.trim();
+            // Prende solo le celle piene di ogni colonna
+            listeObj[colName] = dataRows
+                .map(row => row[colIdx])
+                .filter(val => val !== undefined && val !== null && val.toString().trim() !== "");
+        }
     });
+
     await db.collection('settings').doc('liste_valori').set(listeObj);
-    console.log(`✅ [Liste] Migrate.`);
+    console.log(`   ✅ [Liste] migrate con successo in settings/liste_valori.`);
 }
 
 async function deleteCollection(db, collectionPath) {
     const snapshot = await db.collection(collectionPath).get();
+    if (snapshot.empty) return;
     const batch = db.batch();
     snapshot.docs.forEach(doc => batch.delete(doc.ref));
     await batch.commit();
     console.log(`   🗑️ Collezione [${collectionPath}] svuotata.`);
 }
 
-// Aggiungi questa funzione di utilità nel tuo migrazione.js
 const parseStringToDate = (val) => {
     if (!val) return null;
     const s = val.toString().trim();
-    // Gestione formato DD/MM/YYYY
     if (s.includes('/')) {
         const [d, m, y] = s.split('/');
         return new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
     }
-    // Gestione formato YYYY-MM-DD
     if (s.includes('-')) {
         return new Date(s);
     }
     const d = new Date(s);
-    return isNaN(d.getTime()) ? s : d; // Ritorna la stringa se non è una data valida
+    return isNaN(d.getTime()) ? s : d;
 };
-
 
 start();

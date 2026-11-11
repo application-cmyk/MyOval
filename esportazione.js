@@ -12,14 +12,14 @@ const serviceAccount = require(keyFile);
 
 // 2. DIVERSIFICAZIONE SPREADSHEET ID
 const ID_SS_STAGING = "1FnMM8dOJ_qzbjw9TOVIrEhlOqiUrFAR6tMIb12LeW-E";
-const ID_SS_PROD = "1_SZlQtpiRQhTsQEvFCCkCE3ODzQNrhPbIV7yzntqFT8"; // <--- Cambialo!
+const ID_SS_PROD = "1_SZlQtpiRQhTsQEvFCCkCE3ODzQNrhPbIV7yzntqFT8"; // <--- Cambialo se necessario!
 
 const ID_SS_BASE = env === "prod" ? ID_SS_PROD : ID_SS_STAGING;
 
 initializeApp({ credential: cert(serviceAccount) });
 const db = getFirestore();
 
-// Mappatura identica a migrazione.js
+// Mappatura delle collezioni Firestore -> Fogli Google Spreadsheet
 const targets = {
     'accounts': { ss: ID_SS_BASE, sheet: 'Utenti_Account', coll: 'accounts' },
     'config': { ss: ID_SS_BASE, sheet: 'Config_Campi', coll: 'ui_config' },
@@ -30,14 +30,19 @@ const targets = {
     'shop_art': { ss: ID_SS_BASE, sheet: 'Shop_Articoli', coll: 'shop_items' },
     'shop_tar': { ss: ID_SS_BASE, sheet: 'Shop_Tariffe', coll: 'shop_rates' },
     'shop_sco': { ss: ID_SS_BASE, sheet: 'Shop_Sconti', coll: 'shop_discounts' },
-    'payments': { ss: ID_SS_BASE, sheet: 'Pagamenti', coll: 'payment_items' }
+    'payments': { ss: ID_SS_BASE, sheet: 'Pagamenti', coll: 'payment_items' },
+    // --- NUOVI TARGET AGGIUNTI ---
+    'stagione': { ss: ID_SS_BASE, sheet: 'stagione', coll: 'stagione' },
+    'users': { ss: ID_SS_BASE, sheet: 'users', coll: 'users' }
 };
 
 async function start() {
     if (!cmd) {
         console.log("\n❌ Uso: node esportazione.js [TARGET] [ENV]");
         console.log("Esempi: node esportazione.js all staging");
-        console.log("        node esportazione.js shop_art prod");
+        console.log("        node esportazione.js settings prod");
+        console.log("        node esportazione.js stagione staging");
+        console.log("        node esportazione.js users staging");
         process.exit(1);
     }
 
@@ -50,7 +55,8 @@ async function start() {
     try {
         console.log(`\n🚀 ESPORTAZIONE [${env.toUpperCase()}]`);
 
-        if (cmd === 'liste') {
+        // Gestione 'settings' / 'liste' che punta alla collezione settings/liste_valori
+        if (cmd === 'liste' || cmd === 'settings') {
             await exportListe(sheets, ID_SS_BASE);
         } else if (targets[cmd]) {
             await exportToSheet(sheets, targets[cmd]);
@@ -86,6 +92,11 @@ function formatValue(val) {
         return `${day}/${month}/${year}`;
     }
 
+    // Se è un oggetto o un array, lo serializza in JSON leggibile
+    if (typeof val === 'object') {
+        return JSON.stringify(val);
+    }
+
     return val;
 }
 
@@ -107,7 +118,6 @@ async function exportToSheet(sheets, t) {
 
         // Recupera tutti gli header possibili analizzando tutti i documenti
         const headerSet = new Set();
-        // Mettiamo l'ID come prima colonna se non presente
         headerSet.add("id_doc_firestore");
         docs.forEach(d => Object.keys(d).forEach(k => headerSet.add(k)));
         const headers = Array.from(headerSet);
@@ -123,7 +133,7 @@ async function exportToSheet(sheets, t) {
         await sheets.spreadsheets.values.update({
             spreadsheetId: t.ss,
             range: `${t.sheet}!A1`,
-            valueInputOption: 'USER_ENTERED', // USER_ENTERED riconosce meglio date e numeri
+            valueInputOption: 'USER_ENTERED',
             resource: { values: rows },
         });
         console.log(`   ✅ Esportati ${docs.length} record.`);
@@ -145,7 +155,7 @@ async function exportListe(sheets, spreadsheetId) {
         }
 
         const data = doc.data();
-        const headers = Object.keys(data); // Ogni chiave è una colonna (es. CATEGORIE, RUOLI)
+        const headers = Object.keys(data); // Ogni chiave è una colonna
 
         // Trova la colonna più lunga per determinare quante righe servono
         const maxRows = Math.max(...headers.map(h => Array.isArray(data[h]) ? data[h].length : 0));

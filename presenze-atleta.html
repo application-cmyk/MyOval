@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="it">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyOval - Presenze Allenamenti</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+
+    <script type="importmap">
+    {
+      "imports": {
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js",
+        "firebase/app-check": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app-check.js"
+      }
+    }
+    </script>
+</head>
+
+<body class="bg-light">
+
+    <!-- NAVBAR IDENTICA ALLA HOME -->
+    <nav class="navbar navbar-dark shadow-sm fixed-top" style="background-color: #a00000 !important;">
+        <div class="container-fluid px-md-5">
+            <a class="navbar-brand d-flex align-items-center" href="index.html">
+                <img src="logo-as-rugby-milano.png" class="header-logo me-2" alt="Logo">
+                <span class="fw-bold h4 mb-0" style="letter-spacing: 1px;">MYOVAL</span>
+            </a>
+            <div class="d-flex align-items-center">
+                <span id="user-email-display-presenze" class="text-white me-3 small d-none d-md-inline"></span>
+                <button class="btn btn-sm btn-outline-light rounded-pill px-4 fw-bold"
+                    onclick="location.href='index.html'">
+                    TORNA ALLA HOME
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-5 pt-5 pb-5">
+        <div class="row justify-content-center">
+            <div class="col-lg-11 col-xl-10">
+
+                <!-- SELETTORE ATLETA (SOLO ATLETI) -->
+                <div class="family-header text-center mb-2 mt-3">
+                    <small class="text-muted fw-bold text-uppercase" style="font-size: 10px; letter-spacing: 1px;">
+                        Registra presenza per:
+                    </small>
+                </div>
+                <div class="family-nav mb-4" id="atleti-selector"></div>
+
+                <!-- CARD SESSIONI ALLENAMENTO -->
+                <div class="main-card shadow-sm p-4 border-0 animate__animated animate__fadeIn bg-white"
+                    style="border-radius: 12px;">
+                    <div
+                        class="d-flex justify-content-between align-items-center mb-4 border-bottom pb-3 flex-wrap gap-2">
+                        <div>
+                            <h4 class="fw-bold text-danger mb-0 text-uppercase d-flex align-items-center">
+                                <i class="fas fa-calendar-check me-2"></i>Presenze Allenamenti
+                            </h4>
+                            <small class="text-muted" id="label-categoria-atleta">Categoria: ---</small>
+                        </div>
+                        <span id="label-atleta-selezionato"
+                            class="badge bg-light text-dark border py-2 px-3 fw-bold">---</span>
+                    </div>
+
+                    <!-- TABELLA ALLENAMENTI -->
+                    <div id="allenamenti-list-container" class="d-flex flex-column gap-2">
+                        <!-- Card iniettate da src/presenze-atleta.js -->
+                    </div>
+
+                    <div id="status-message" class="text-center mt-4"></div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Script specifico -->
+    <script type="module" src="./src/presenze-atleta.js"></script>
+</body>
+
+</html>

@@ -1,5 +1,5 @@
 import { auth, db } from "./firebase-config.js";
-import { } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import { collection, getDocs, doc, getDoc, query, where } from "firebase/firestore";
 
 // 1. VERIFICA SICUREZZA ACCESSO
@@ -33,20 +33,20 @@ window.avviaImpersonate = function (targetEmail) {
 // ==========================================
 // 2. GESTIONE PULSANTE FIR (ATTIVO - APERTURA DIRETTA)
 // ==========================================
+console.log("Script admin_control.js caricato correttamente!");
+
 document.getElementById('btn-fir').addEventListener('click', () => {
+    console.log("Bottone APRI FIR cliccato!"); // <--- Questo deve stamparsi in console
+
     const codiceFir = document.getElementById('inp-fir').value.toLowerCase().trim();
 
     if (codiceFir.length < 1) {
         return alert("Inserisci il Codice FIR.");
     }
 
-    // 1. Al codice FIR viene aggiunto '@rugbymilano.it'
     const targetEmail = `${codiceFir}@rugbymilano.it`;
-
-    // 2 & 3. Presenta form di conferma (dentro avviaImpersonate) e apre index
     window.avviaImpersonate(targetEmail);
 });
-
 
 // ==========================================
 // 3. GESTIONE PULSANTE EMAIL (PROSSIMAMENTE)

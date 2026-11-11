@@ -27,7 +27,8 @@ const testConfig = {
 };
 
 // Logica per determinare l'ambiente
-export const isProd = window.location.hostname.includes("rugby-milano-app-16681");
+//export const isProd = window.location.hostname.includes("rugby-milano-app-16681");
+export const isProd = window.location.hostname.includes("portale.rugbymilano.it");
 const config = isProd ? prodConfig : testConfig;
 
 export const APP_ENV = isProd ? "production" : "staging";
@@ -35,6 +36,10 @@ export const APP_ENV = isProd ? "production" : "staging";
 if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
   self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
 }
+
+export const GESTIONE_BASE_URL = isProd
+  ? "https://rugby-milano-gestione.web.app"
+  : "https://rugby-milano-gestione-test.web.app";
 
 const app = initializeApp(config);
 export const auth = getAuth(app);
